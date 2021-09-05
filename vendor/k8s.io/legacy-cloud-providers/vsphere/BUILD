@@ -12,7 +12,6 @@ go_library(
         "credentialmanager.go",
         "doc.go",
         "nodemanager.go",
-        "shared_datastore.go",
         "vsphere.go",
         "vsphere_util.go",
         "vsphere_util_linux.go",

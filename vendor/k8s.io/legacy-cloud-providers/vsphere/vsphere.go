@@ -561,7 +561,6 @@ func (vs *VSphere) Instances() (cloudprovider.Instances, bool) {
 }
 
 // InstancesV2 returns an implementation of InstancesV2 for vSphere.
-// TODO: implement ONLY for external cloud provider
 func (vs *VSphere) InstancesV2() (cloudprovider.InstancesV2, bool) {
 	return nil, false
 }
@@ -796,6 +795,41 @@ func (vs *VSphere) InstanceShutdownByProviderID(ctx context.Context, providerID 
 		return false, err
 	}
 	return !isActive, nil
+}
+
+// InstanceMetadataByProviderID returns metadata of the specified instance.
+func (vs *VSphere) InstanceMetadataByProviderID(ctx context.Context, providerID string) (*cloudprovider.InstanceMetadata, error) {
+	if providerID == "" {
+		return nil, fmt.Errorf("couldn't compute InstanceMetadata for empty providerID")
+	}
+
+	// TODO dropped get nodeName by GetNodeNameFromProviderID here. If it not behave as expected,
+	// get nodeName by vm.GetNodeNameFromProviderID.
+	return vs.instanceMetadataByNodeName(ctx, convertToK8sType(providerID))
+}
+
+func (vs *VSphere) instanceMetadataByNodeName(ctx context.Context, nodeName k8stypes.NodeName) (*cloudprovider.InstanceMetadata, error) {
+	if vs.hostName == convertToString(nodeName) {
+		addresses, err := vs.getNodeAddressesFromLocalIP()
+		if err != nil {
+			return nil, err
+		}
+		return &cloudprovider.InstanceMetadata{
+			ProviderID:    vs.vmUUID,
+			Type:          "",
+			NodeAddresses: addresses,
+		}, nil
+	}
+
+	addresses, err := vs.getNodeAddressesFromVM(ctx, nodeName)
+	if err != nil {
+		return nil, err
+	}
+	return &cloudprovider.InstanceMetadata{
+		ProviderID:    vs.vmUUID,
+		Type:          "",
+		NodeAddresses: addresses,
+	}, nil
 }
 
 // InstanceID returns the cloud provider ID of the node with the specified Name.
@@ -1340,20 +1374,13 @@ func (vs *VSphere) CreateVolume(volumeOptions *vclib.VolumeOptions) (canonicalVo
 				if len(zonesToSearch) == 0 {
 					// If zone is not provided, get the shared datastore across all node VMs.
 					klog.V(4).Infof("Validating if datastore %s is shared across all node VMs", datastoreName)
-					sharedDSFinder := &sharedDatastore{
-						nodeManager:         vs.nodeManager,
-						candidateDatastores: candidateDatastoreInfos,
-					}
-					datastoreInfo, err = sharedDSFinder.getSharedDatastore(ctx)
+					sharedDsList, err = getSharedDatastoresInK8SCluster(ctx, vs.nodeManager)
 					if err != nil {
 						klog.Errorf("Failed to get shared datastore: %+v", err)
 						return "", err
 					}
-					if datastoreInfo == nil {
-						err = fmt.Errorf("The specified datastore %s is not a shared datastore across node VMs", datastoreName)
-						klog.Error(err)
-						return "", err
-					}
+					// Prepare error msg to be used later, if required.
+					err = fmt.Errorf("The specified datastore %s is not a shared datastore across node VMs", datastoreName)
 				} else {
 					// If zone is provided, get the shared datastores in that zone.
 					klog.V(4).Infof("Validating if datastore %s is in zone %s ", datastoreName, zonesToSearch)
@@ -1362,19 +1389,21 @@ func (vs *VSphere) CreateVolume(volumeOptions *vclib.VolumeOptions) (canonicalVo
 						klog.Errorf("Failed to find a shared datastore matching zone %s. err: %+v", zonesToSearch, err)
 						return "", err
 					}
-					found := false
-					for _, sharedDs := range sharedDsList {
-						if datastoreInfo, found = candidateDatastores[sharedDs.Info.Url]; found {
-							klog.V(4).Infof("Datastore validation succeeded")
-							found = true
-							break
-						}
+					// Prepare error msg to be used later, if required.
+					err = fmt.Errorf("The specified datastore %s does not match the provided zones : %s", datastoreName, zonesToSearch)
+				}
+				found := false
+				// Check if the selected datastore belongs to the list of shared datastores computed.
+				for _, sharedDs := range sharedDsList {
+					if datastoreInfo, found = candidateDatastores[sharedDs.Info.Url]; found {
+						klog.V(4).Infof("Datastore validation succeeded")
+						found = true
+						break
 					}
-					if !found {
-						err = fmt.Errorf("The specified datastore %s does not match the provided zones : %s", datastoreName, zonesToSearch)
-						klog.Error(err)
-						return "", err
-					}
+				}
+				if !found {
+					klog.Error(err)
+					return "", err
 				}
 			}
 		}
@@ -1505,7 +1534,7 @@ func (vs *VSphere) SecretAdded(obj interface{}) {
 		return
 	}
 
-	klog.V(4).Infof("refreshing node cache for secret: %s/%s", secret.Namespace, secret.Name)
+	klog.V(4).Infof("secret added: %+v", obj)
 	vs.refreshNodesForSecretChange()
 }
 
@@ -1529,7 +1558,7 @@ func (vs *VSphere) SecretUpdated(obj interface{}, newObj interface{}) {
 		return
 	}
 
-	klog.V(4).Infof("refreshing node cache for secret: %s/%s", secret.Namespace, secret.Name)
+	klog.V(4).Infof("secret updated: %+v", newObj)
 	vs.refreshNodesForSecretChange()
 }
 

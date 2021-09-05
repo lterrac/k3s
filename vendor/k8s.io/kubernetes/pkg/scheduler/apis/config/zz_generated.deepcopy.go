@@ -286,11 +286,6 @@ func (in *NodeResourcesFitArgs) DeepCopyInto(out *NodeResourcesFitArgs) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	if in.IgnoredResourceGroups != nil {
-		in, out := &in.IgnoredResourceGroups, &out.IgnoredResourceGroups
-		*out = make([]string, len(*in))
-		copy(*out, *in)
-	}
 	return
 }
 

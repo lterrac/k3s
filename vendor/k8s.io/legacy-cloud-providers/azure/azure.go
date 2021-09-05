@@ -248,7 +248,7 @@ type Cloud struct {
 
 	ResourceRequestBackoff wait.Backoff
 	metadata               *InstanceMetadataService
-	VMSet                  VMSet
+	vmSet                  VMSet
 
 	// ipv6DualStack allows overriding for unit testing.  It's normally initialized from featuregates
 	ipv6DualStackEnabled bool
@@ -391,7 +391,7 @@ func (az *Cloud) InitializeCloudFromConfig(config *Config, fromSecret bool) erro
 		// No credentials provided, useInstanceMetadata should be enabled for Kubelet.
 		// TODO(feiskyer): print different error message for Kubelet and controller-manager, as they're
 		// requiring different credential settings.
-		if !config.UseInstanceMetadata && config.CloudConfigType == cloudConfigTypeFile {
+		if !config.UseInstanceMetadata && az.Config.CloudConfigType == cloudConfigTypeFile {
 			return fmt.Errorf("useInstanceMetadata must be enabled without Azure credentials")
 		}
 
@@ -459,7 +459,7 @@ func (az *Cloud) InitializeCloudFromConfig(config *Config, fromSecret bool) erro
 	az.Config = *config
 	az.Environment = *env
 	az.ResourceRequestBackoff = resourceRequestBackoff
-	az.metadata, err = NewInstanceMetadataService(imdsServer)
+	az.metadata, err = NewInstanceMetadataService(metadataURL)
 	if err != nil {
 		return err
 	}
@@ -491,12 +491,12 @@ func (az *Cloud) InitializeCloudFromConfig(config *Config, fromSecret bool) erro
 	}
 
 	if strings.EqualFold(vmTypeVMSS, az.Config.VMType) {
-		az.VMSet, err = newScaleSet(az)
+		az.vmSet, err = newScaleSet(az)
 		if err != nil {
 			return err
 		}
 	} else {
-		az.VMSet = newAvailabilitySet(az)
+		az.vmSet = newAvailabilitySet(az)
 	}
 
 	az.vmCache, err = az.newVMCache()
@@ -665,7 +665,6 @@ func (az *Cloud) Instances() (cloudprovider.Instances, bool) {
 }
 
 // InstancesV2 returns an instancesV2 interface. Also returns true if the interface is supported, false otherwise.
-// TODO: implement ONLY for external cloud provider
 func (az *Cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
 	return nil, false
 }

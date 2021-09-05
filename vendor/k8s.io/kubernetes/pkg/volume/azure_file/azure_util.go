@@ -34,12 +34,9 @@ const (
 	dirMode         = "dir_mode"
 	gid             = "gid"
 	vers            = "vers"
-	actimeo         = "actimeo"
-	mfsymlinks      = "mfsymlinks"
 	defaultFileMode = "0777"
 	defaultDirMode  = "0777"
 	defaultVers     = "3.0"
-	defaultActimeo  = "30"
 )
 
 // Abstract interface to azure file operations.
@@ -109,8 +106,6 @@ func appendDefaultMountOptions(mountOptions []string, fsGroup *int64) []string {
 	dirModeFlag := false
 	versFlag := false
 	gidFlag := false
-	actimeoFlag := false
-	mfsymlinksFlag := false
 
 	for _, mountOption := range mountOptions {
 		if strings.HasPrefix(mountOption, fileMode) {
@@ -124,12 +119,6 @@ func appendDefaultMountOptions(mountOptions []string, fsGroup *int64) []string {
 		}
 		if strings.HasPrefix(mountOption, gid) {
 			gidFlag = true
-		}
-		if strings.HasPrefix(mountOption, actimeo) {
-			actimeoFlag = true
-		}
-		if strings.HasPrefix(mountOption, mfsymlinks) {
-			mfsymlinksFlag = true
 		}
 	}
 
@@ -148,14 +137,6 @@ func appendDefaultMountOptions(mountOptions []string, fsGroup *int64) []string {
 
 	if !gidFlag && fsGroup != nil {
 		allMountOptions = append(allMountOptions, fmt.Sprintf("%s=%d", gid, *fsGroup))
-	}
-
-	if !actimeoFlag {
-		allMountOptions = append(allMountOptions, fmt.Sprintf("%s=%s", actimeo, defaultActimeo))
-	}
-
-	if !mfsymlinksFlag {
-		allMountOptions = append(allMountOptions, mfsymlinks)
 	}
 	return allMountOptions
 }

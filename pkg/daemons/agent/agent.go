@@ -71,6 +71,9 @@ func startKubelet(cfg *config.Agent) error {
 		"anonymous-auth":               "false",
 		"authorization-mode":           modes.ModeWebhook,
 	}
+
+	argsMap["feature-gates"] = addFeatureGate(argsMap["feature-gates"], "InPlacePodVerticalScaling=true")
+
 	if cfg.PodManifests != "" && argsMap["pod-manifest-path"] == "" {
 		argsMap["pod-manifest-path"] = cfg.PodManifests
 	}

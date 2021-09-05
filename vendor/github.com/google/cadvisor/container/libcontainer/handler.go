@@ -29,13 +29,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencontainers/runc/libcontainer"
-	"github.com/opencontainers/runc/libcontainer/cgroups"
-	"github.com/opencontainers/runc/libcontainer/cgroups/fs2"
-	"k8s.io/klog/v2"
-
 	"github.com/google/cadvisor/container"
 	info "github.com/google/cadvisor/info/v1"
+	"golang.org/x/sys/unix"
+
+	"github.com/opencontainers/runc/libcontainer"
+	"github.com/opencontainers/runc/libcontainer/cgroups"
+	fs2 "github.com/opencontainers/runc/libcontainer/cgroups/fs2"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -117,58 +118,56 @@ func (h *Handler) GetStats() (*info.ContainerStats, error) {
 	}
 
 	// If we know the pid then get network stats from /proc/<pid>/net/dev
-	if h.pid > 0 {
-		if h.includedMetrics.Has(container.NetworkUsageMetrics) {
-			netStats, err := networkStatsFromProc(h.rootFs, h.pid)
-			if err != nil {
-				klog.V(4).Infof("Unable to get network stats from pid %d: %v", h.pid, err)
-			} else {
-				stats.Network.Interfaces = append(stats.Network.Interfaces, netStats...)
-			}
-		}
-		if h.includedMetrics.Has(container.NetworkTcpUsageMetrics) {
-			t, err := tcpStatsFromProc(h.rootFs, h.pid, "net/tcp")
-			if err != nil {
-				klog.V(4).Infof("Unable to get tcp stats from pid %d: %v", h.pid, err)
-			} else {
-				stats.Network.Tcp = t
-			}
-
-			t6, err := tcpStatsFromProc(h.rootFs, h.pid, "net/tcp6")
-			if err != nil {
-				klog.V(4).Infof("Unable to get tcp6 stats from pid %d: %v", h.pid, err)
-			} else {
-				stats.Network.Tcp6 = t6
-			}
-
-		}
-		if h.includedMetrics.Has(container.NetworkAdvancedTcpUsageMetrics) {
-			ta, err := advancedTCPStatsFromProc(h.rootFs, h.pid, "net/netstat", "net/snmp")
-			if err != nil {
-				klog.V(4).Infof("Unable to get advanced tcp stats from pid %d: %v", h.pid, err)
-			} else {
-				stats.Network.TcpAdvanced = ta
-			}
-		}
-		if h.includedMetrics.Has(container.NetworkUdpUsageMetrics) {
-			u, err := udpStatsFromProc(h.rootFs, h.pid, "net/udp")
-			if err != nil {
-				klog.V(4).Infof("Unable to get udp stats from pid %d: %v", h.pid, err)
-			} else {
-				stats.Network.Udp = u
-			}
-
-			u6, err := udpStatsFromProc(h.rootFs, h.pid, "net/udp6")
-			if err != nil {
-				klog.V(4).Infof("Unable to get udp6 stats from pid %d: %v", h.pid, err)
-			} else {
-				stats.Network.Udp6 = u6
-			}
+	if h.pid == 0 {
+		return stats, nil
+	}
+	if h.includedMetrics.Has(container.NetworkUsageMetrics) {
+		netStats, err := networkStatsFromProc(h.rootFs, h.pid)
+		if err != nil {
+			klog.V(4).Infof("Unable to get network stats from pid %d: %v", h.pid, err)
+		} else {
+			stats.Network.Interfaces = append(stats.Network.Interfaces, netStats...)
 		}
 	}
-	// some process metrics are per container ( number of processes, number of
-	// file descriptors etc.) and not required a proper container's
-	// root PID (systemd services don't have the root PID atm)
+	if h.includedMetrics.Has(container.NetworkTcpUsageMetrics) {
+		t, err := tcpStatsFromProc(h.rootFs, h.pid, "net/tcp")
+		if err != nil {
+			klog.V(4).Infof("Unable to get tcp stats from pid %d: %v", h.pid, err)
+		} else {
+			stats.Network.Tcp = t
+		}
+
+		t6, err := tcpStatsFromProc(h.rootFs, h.pid, "net/tcp6")
+		if err != nil {
+			klog.V(4).Infof("Unable to get tcp6 stats from pid %d: %v", h.pid, err)
+		} else {
+			stats.Network.Tcp6 = t6
+		}
+
+	}
+	if h.includedMetrics.Has(container.NetworkAdvancedTcpUsageMetrics) {
+		ta, err := advancedTCPStatsFromProc(h.rootFs, h.pid, "net/netstat", "net/snmp")
+		if err != nil {
+			klog.V(4).Infof("Unable to get advanced tcp stats from pid %d: %v", h.pid, err)
+		} else {
+			stats.Network.TcpAdvanced = ta
+		}
+	}
+	if h.includedMetrics.Has(container.NetworkUdpUsageMetrics) {
+		u, err := udpStatsFromProc(h.rootFs, h.pid, "net/udp")
+		if err != nil {
+			klog.V(4).Infof("Unable to get udp stats from pid %d: %v", h.pid, err)
+		} else {
+			stats.Network.Udp = u
+		}
+
+		u6, err := udpStatsFromProc(h.rootFs, h.pid, "net/udp6")
+		if err != nil {
+			klog.V(4).Infof("Unable to get udp6 stats from pid %d: %v", h.pid, err)
+		} else {
+			stats.Network.Udp6 = u6
+		}
+	}
 	if h.includedMetrics.Has(container.ProcessMetrics) {
 		paths := h.cgroupManager.GetPaths()
 		path, ok := paths["cpu"]
@@ -299,15 +298,13 @@ func processStatsFromProcs(rootFs string, cgroupPath string, rootPid int) (info.
 			}
 		}
 	}
+	ulimits := processRootProcUlimits(rootFs, rootPid)
 
 	processStats := info.ProcessStats{
 		ProcessCount: uint64(len(pids)),
 		FdCount:      fdCount,
 		SocketCount:  socketCount,
-	}
-
-	if rootPid > 0 {
-		processStats.Ulimits = processRootProcUlimits(rootFs, rootPid)
+		Ulimits:      ulimits,
 	}
 
 	return processStats, nil
@@ -757,6 +754,16 @@ func (h *Handler) GetProcesses() ([]int, error) {
 	return pids, nil
 }
 
+func minUint32(x, y uint32) uint32 {
+	if x < y {
+		return x
+	}
+	return y
+}
+
+// var to allow unit tests to stub it out
+var numCpusFunc = getNumberOnlineCPUs
+
 // Convert libcontainer stats to info.ContainerStats.
 func setCPUStats(s *cgroups.Stats, ret *info.ContainerStats, withPerCPU bool) {
 	ret.Cpu.Usage.User = s.CpuStats.CpuUsage.UsageInUsermode
@@ -774,7 +781,37 @@ func setCPUStats(s *cgroups.Stats, ret *info.ContainerStats, withPerCPU bool) {
 		// cpuacct subsystem.
 		return
 	}
-	ret.Cpu.Usage.PerCpu = s.CpuStats.CpuUsage.PercpuUsage
+
+	numPossible := uint32(len(s.CpuStats.CpuUsage.PercpuUsage))
+	// Note that as of https://patchwork.kernel.org/patch/8607101/ (kernel v4.7),
+	// the percpu usage information includes extra zero values for all additional
+	// possible CPUs. This is to allow statistic collection after CPU-hotplug.
+	// We intentionally ignore these extra zeroes.
+	numActual, err := numCpusFunc()
+	if err != nil {
+		klog.Errorf("unable to determine number of actual cpus; defaulting to maximum possible number: errno %v", err)
+		numActual = numPossible
+	}
+	if numActual > numPossible {
+		// The real number of cores should never be greater than the number of
+		// datapoints reported in cpu usage.
+		klog.Errorf("PercpuUsage had %v cpus, but the actual number is %v; ignoring extra CPUs", numPossible, numActual)
+	}
+	numActual = minUint32(numPossible, numActual)
+	ret.Cpu.Usage.PerCpu = make([]uint64, numActual)
+
+	for i := uint32(0); i < numActual; i++ {
+		ret.Cpu.Usage.PerCpu[i] = s.CpuStats.CpuUsage.PercpuUsage[i]
+	}
+
+}
+
+func getNumberOnlineCPUs() (uint32, error) {
+	var availableCPUs unix.CPUSet
+	if err := unix.SchedGetaffinity(0, &availableCPUs); err != nil {
+		return 0, err
+	}
+	return uint32(availableCPUs.Count()), nil
 }
 
 func setDiskIoStats(s *cgroups.Stats, ret *info.ContainerStats) {

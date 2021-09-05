@@ -29,7 +29,7 @@ import (
 )
 
 // Container "names" are implementation details that do not concern
-// kubelet/CRI. This CRI shim uses names to fulfill the CRI requirement to
+// kubelet. This CRI shim uses names to fulfill the CRI requirement to
 // make sandbox/container creation idempotent. CRI states that there can
 // only exist one sandbox/container with the given metadata. To enforce this,
 // this shim constructs a name using the fields in the metadata so that

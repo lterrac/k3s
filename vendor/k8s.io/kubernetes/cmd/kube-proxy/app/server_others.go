@@ -35,7 +35,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/fields"
 
-	libcontainersystem "github.com/opencontainers/runc/libcontainer/system"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -92,6 +91,26 @@ func newProxyServer(
 		return nil, fmt.Errorf("unable to register configz: %s", err)
 	}
 
+	hostname, err := utilnode.GetHostname(config.HostnameOverride)
+	if err != nil {
+		return nil, err
+	}
+
+	client, eventClient, err := createClients(config.ClientConnection, master)
+	if err != nil {
+		return nil, err
+	}
+
+	nodeIP := detectNodeIP(client, hostname, config.BindAddress)
+
+	protocol := utiliptables.ProtocolIPv4
+	if utilsnet.IsIPv6(nodeIP) {
+		klog.V(0).Infof("kube-proxy node IP is an IPv6 address (%s), assume IPv6 operation", nodeIP.String())
+		protocol = utiliptables.ProtocolIPv6
+	} else {
+		klog.V(0).Infof("kube-proxy node IP is an IPv4 address (%s), assume IPv4 operation", nodeIP.String())
+	}
+
 	var iptInterface utiliptables.Interface
 	var ipvsInterface utilipvs.Interface
 	var kernelHandler ipvs.KernelHandler
@@ -100,6 +119,7 @@ func newProxyServer(
 	// Create a iptables utils.
 	execer := exec.New()
 
+	iptInterface = utiliptables.New(execer, protocol)
 	kernelHandler = ipvs.NewLinuxKernelHandler()
 	ipsetInterface = utilipset.New(execer)
 	canUseIPVS, err := ipvs.CanUseIPVSProxier(kernelHandler, ipsetInterface)
@@ -115,6 +135,7 @@ func newProxyServer(
 	if cleanupAndExit {
 		return &ProxyServer{
 			execer:         execer,
+			IptInterface:   iptInterface,
 			IpvsInterface:  ipvsInterface,
 			IpsetInterface: ipsetInterface,
 		}, nil
@@ -123,27 +144,6 @@ func newProxyServer(
 	if len(config.ShowHiddenMetricsForVersion) > 0 {
 		metrics.SetShowHidden()
 	}
-
-	hostname, err := utilnode.GetHostname(config.HostnameOverride)
-	if err != nil {
-		return nil, err
-	}
-
-	client, eventClient, err := createClients(config.ClientConnection, master)
-	if err != nil {
-		return nil, err
-	}
-
-	nodeIP := detectNodeIP(client, hostname, config.BindAddress)
-	protocol := utiliptables.ProtocolIPv4
-	if utilsnet.IsIPv6(nodeIP) {
-		klog.V(0).Infof("kube-proxy node IP is an IPv6 address (%s), assume IPv6 operation", nodeIP.String())
-		protocol = utiliptables.ProtocolIPv6
-	} else {
-		klog.V(0).Infof("kube-proxy node IP is an IPv4 address (%s), assume IPv4 operation", nodeIP.String())
-	}
-
-	iptInterface = utiliptables.New(execer, protocol)
 
 	// Create event recorder
 	eventBroadcaster := record.NewBroadcaster()
@@ -360,18 +360,6 @@ func newProxyServer(
 		}
 	}
 
-	useEndpointSlices := utilfeature.DefaultFeatureGate.Enabled(features.EndpointSliceProxying)
-	if proxyMode == proxyModeUserspace {
-		// userspace mode doesn't support endpointslice.
-		useEndpointSlices = false
-	}
-
-	var connTracker Conntracker
-	if !libcontainersystem.RunningInUserNS() {
-		// if we are in userns, sysctl does not work and connTracker should be kept nil
-		connTracker = &realConntracker{}
-	}
-
 	return &ProxyServer{
 		Client:                 client,
 		EventClient:            eventClient,
@@ -383,7 +371,7 @@ func newProxyServer(
 		Broadcaster:            eventBroadcaster,
 		Recorder:               recorder,
 		ConntrackConfiguration: config.Conntrack,
-		Conntracker:            connTracker,
+		Conntracker:            &realConntracker{},
 		ProxyMode:              proxyMode,
 		NodeRef:                nodeRef,
 		MetricsBindAddress:     config.MetricsBindAddress,
@@ -392,7 +380,7 @@ func newProxyServer(
 		OOMScoreAdj:            config.OOMScoreAdj,
 		ConfigSyncPeriod:       config.ConfigSyncPeriod.Duration,
 		HealthzServer:          healthzServer,
-		UseEndpointSlices:      useEndpointSlices,
+		UseEndpointSlices:      utilfeature.DefaultFeatureGate.Enabled(features.EndpointSliceProxying),
 	}, nil
 }
 

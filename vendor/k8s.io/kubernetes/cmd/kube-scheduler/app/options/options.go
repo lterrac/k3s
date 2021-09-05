@@ -41,7 +41,6 @@ import (
 	componentbaseconfig "k8s.io/component-base/config"
 	"k8s.io/component-base/config/options"
 	configv1alpha1 "k8s.io/component-base/config/v1alpha1"
-	"k8s.io/component-base/logs"
 	"k8s.io/component-base/metrics"
 	"k8s.io/klog/v2"
 	kubeschedulerconfigv1beta1 "k8s.io/kube-scheduler/config/v1beta1"
@@ -62,7 +61,6 @@ type Options struct {
 	Authentication          *apiserveroptions.DelegatingAuthenticationOptions
 	Authorization           *apiserveroptions.DelegatingAuthorizationOptions
 	Metrics                 *metrics.Options
-	Logs                    *logs.Options
 	Deprecated              *DeprecatedOptions
 
 	// ConfigFile is the location of the scheduler server's configuration file.
@@ -108,7 +106,6 @@ func NewOptions() (*Options, error) {
 			HardPodAffinitySymmetricWeight: 1,
 		},
 		Metrics: metrics.NewOptions(),
-		Logs:    logs.NewOptions(),
 	}
 
 	o.Authentication.TolerateInClusterLookupFailure = true
@@ -151,11 +148,7 @@ func newDefaultComponentConfig() (*kubeschedulerconfig.KubeSchedulerConfiguratio
 // Flags returns flags for a specific scheduler by section name
 func (o *Options) Flags() (nfs cliflag.NamedFlagSets) {
 	fs := nfs.FlagSet("misc")
-	fs.StringVar(&o.ConfigFile, "config", o.ConfigFile, `The path to the configuration file. The following flags can overwrite fields in this file:
-  --algorithm-provider
-  --policy-config-file
-  --policy-configmap
-  --policy-configmap-namespace`)
+	fs.StringVar(&o.ConfigFile, "config", o.ConfigFile, "The path to the configuration file. Flags override values in this file.")
 	fs.StringVar(&o.WriteConfigTo, "write-config-to", o.WriteConfigTo, "If set, write the configuration values to this file and exit.")
 	fs.StringVar(&o.Master, "master", o.Master, "The address of the Kubernetes API server (overrides any value in kubeconfig)")
 
@@ -168,7 +161,6 @@ func (o *Options) Flags() (nfs cliflag.NamedFlagSets) {
 	options.BindLeaderElectionFlags(&o.ComponentConfig.LeaderElection, nfs.FlagSet("leader election"))
 	utilfeature.DefaultMutableFeatureGate.AddFlag(nfs.FlagSet("feature gate"))
 	o.Metrics.AddFlags(nfs.FlagSet("metrics"))
-	o.Logs.AddFlags(nfs.FlagSet("logs"))
 
 	return nfs
 }
@@ -178,8 +170,10 @@ func (o *Options) ApplyTo(c *schedulerappconfig.Config) error {
 	if len(o.ConfigFile) == 0 {
 		c.ComponentConfig = o.ComponentConfig
 
-		// apply deprecated flags if no config file is loaded (this is the old behaviour).
-		o.Deprecated.ApplyTo(&c.ComponentConfig)
+		// only apply deprecated flags if no config file is loaded (this is the old behaviour).
+		if err := o.Deprecated.ApplyTo(&c.ComponentConfig); err != nil {
+			return err
+		}
 		if err := o.CombinedInsecureServing.ApplyTo(c, &c.ComponentConfig); err != nil {
 			return err
 		}
@@ -192,18 +186,11 @@ func (o *Options) ApplyTo(c *schedulerappconfig.Config) error {
 			return err
 		}
 
+		// use the loaded config file only, with the exception of --address and --port. This means that
+		// none of the deprecated flags in o.Deprecated are taken into consideration. This is the old
+		// behaviour of the flags we have to keep.
 		c.ComponentConfig = *cfg
 
-		// apply any deprecated Policy flags, if applicable
-		o.Deprecated.ApplyAlgorithmSourceTo(&c.ComponentConfig)
-
-		// if the user has set CC profiles and is trying to use a Policy config, error out
-		// these configs are no longer merged and they should not be used simultaneously
-		if !emptySchedulerProfileConfig(c.ComponentConfig.Profiles) && c.ComponentConfig.AlgorithmSource.Policy != nil {
-			return fmt.Errorf("cannot set a Plugin config and Policy config")
-		}
-
-		// use the loaded config file only, with the exception of --address and --port.
 		if err := o.CombinedInsecureServing.ApplyToFromLoadedConfig(c, &c.ComponentConfig); err != nil {
 			return err
 		}
@@ -221,17 +208,7 @@ func (o *Options) ApplyTo(c *schedulerappconfig.Config) error {
 		}
 	}
 	o.Metrics.Apply()
-	o.Logs.Apply()
 	return nil
-}
-
-// emptySchedulerProfileConfig returns true if the list of profiles passed to it contains only
-// the "default-scheduler" profile with no plugins or pluginconfigs registered
-// (this is the default empty profile initialized by defaults.go)
-func emptySchedulerProfileConfig(profiles []kubeschedulerconfig.KubeSchedulerProfile) bool {
-	return len(profiles) == 1 &&
-		len(profiles[0].PluginConfig) == 0 &&
-		profiles[0].Plugins == nil
 }
 
 // Validate validates all the required options.
@@ -247,7 +224,6 @@ func (o *Options) Validate() []error {
 	errs = append(errs, o.Authorization.Validate()...)
 	errs = append(errs, o.Deprecated.Validate()...)
 	errs = append(errs, o.Metrics.Validate()...)
-	errs = append(errs, o.Logs.Validate()...)
 
 	return errs
 }

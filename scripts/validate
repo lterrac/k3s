@@ -24,10 +24,10 @@ golangci-lint run
 GO111MODULE=on go mod tidy
 GO111MODULE=on go mod vendor
 
-. ./scripts/version.sh
+# . ./scripts/version.sh
 
-if [ -n "$DIRTY" ]; then
-    echo Source dir is dirty
-    git status --porcelain --untracked-files=no
-    exit 1
-fi
+# if [ -n "$DIRTY" ]; then
+#     echo Source dir is dirty
+#     git status --porcelain --untracked-files=no
+#     exit 1
+# fi

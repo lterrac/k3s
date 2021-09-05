@@ -19,6 +19,8 @@ package memory
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"sync"
 	"syscall"
 
@@ -62,11 +64,19 @@ var _ discovery.CachedDiscoveryInterface = &memCacheClient{}
 // "Connection reset" error which usually means that apiserver is temporarily
 // unavailable.
 func isTransientConnectionError(err error) bool {
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
-		return errno == syscall.ECONNREFUSED || errno == syscall.ECONNRESET
+	urlError, ok := err.(*url.Error)
+	if !ok {
+		return false
 	}
-	return false
+	opError, ok := urlError.Err.(*net.OpError)
+	if !ok {
+		return false
+	}
+	errno, ok := opError.Err.(syscall.Errno)
+	if !ok {
+		return false
+	}
+	return errno == syscall.ECONNREFUSED || errno == syscall.ECONNRESET
 }
 
 func isTransientError(err error) bool {

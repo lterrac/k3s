@@ -18,9 +18,13 @@ import (
 	"github.com/rancher/k3s/pkg/configfilearg"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
+	"k8s.io/klog"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 func main() {
+	klog.Infof("porcodiaz: %v", features.InPlacePodVerticalScaling)
+
 	app := cmds.NewApp()
 	app.Commands = []cli.Command{
 		cmds.NewServerCommand(server.Run),

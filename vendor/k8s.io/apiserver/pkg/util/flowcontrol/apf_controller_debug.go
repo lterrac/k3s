@@ -34,20 +34,20 @@ const (
 	queryIncludeRequestDetails = "includeRequestDetails"
 )
 
-func (cfgCtlr *configController) Install(c *mux.PathRecorderMux) {
+func (cfgCtl *configController) Install(c *mux.PathRecorderMux) {
 	// TODO(yue9944882): handle "Accept" header properly
 	// debugging dumps a CSV content for three levels of granularity
 	// 1. row per priority-level
-	c.UnlistedHandleFunc("/debug/api_priority_and_fairness/dump_priority_levels", cfgCtlr.dumpPriorityLevels)
+	c.UnlistedHandleFunc("/debug/api_priority_and_fairness/dump_priority_levels", cfgCtl.dumpPriorityLevels)
 	// 2. row per queue
-	c.UnlistedHandleFunc("/debug/api_priority_and_fairness/dump_queues", cfgCtlr.dumpQueues)
+	c.UnlistedHandleFunc("/debug/api_priority_and_fairness/dump_queues", cfgCtl.dumpQueues)
 	// 3. row per request
-	c.UnlistedHandleFunc("/debug/api_priority_and_fairness/dump_requests", cfgCtlr.dumpRequests)
+	c.UnlistedHandleFunc("/debug/api_priority_and_fairness/dump_requests", cfgCtl.dumpRequests)
 }
 
-func (cfgCtlr *configController) dumpPriorityLevels(w http.ResponseWriter, r *http.Request) {
-	cfgCtlr.lock.Lock()
-	defer cfgCtlr.lock.Unlock()
+func (cfgCtl *configController) dumpPriorityLevels(w http.ResponseWriter, r *http.Request) {
+	cfgCtl.lock.Lock()
+	defer cfgCtl.lock.Unlock()
 	tabWriter := tabwriter.NewWriter(w, 8, 0, 1, ' ', 0)
 	columnHeaders := []string{
 		"PriorityLevelName", // 1
@@ -58,8 +58,8 @@ func (cfgCtlr *configController) dumpPriorityLevels(w http.ResponseWriter, r *ht
 		"ExecutingRequests", // 6
 	}
 	tabPrint(tabWriter, rowForHeaders(columnHeaders))
-	endLine(tabWriter)
-	for _, plState := range cfgCtlr.priorityLevelStates {
+	endline(tabWriter)
+	for _, plState := range cfgCtl.priorityLevelStates {
 		if plState.queues == nil {
 			tabPrint(tabWriter, row(
 				plState.pl.Name, // 1
@@ -69,7 +69,7 @@ func (cfgCtlr *configController) dumpPriorityLevels(w http.ResponseWriter, r *ht
 				"<none>",        // 5
 				"<none>",        // 6
 			))
-			endLine(tabWriter)
+			endline(tabWriter)
 			continue
 		}
 		queueSetDigest := plState.queues.Dump(false)
@@ -88,14 +88,14 @@ func (cfgCtlr *configController) dumpPriorityLevels(w http.ResponseWriter, r *ht
 			queueSetDigest.Waiting,   // 5
 			queueSetDigest.Executing, // 6
 		))
-		endLine(tabWriter)
+		endline(tabWriter)
 	}
 	runtime.HandleError(tabWriter.Flush())
 }
 
-func (cfgCtlr *configController) dumpQueues(w http.ResponseWriter, r *http.Request) {
-	cfgCtlr.lock.Lock()
-	defer cfgCtlr.lock.Unlock()
+func (cfgCtl *configController) dumpQueues(w http.ResponseWriter, r *http.Request) {
+	cfgCtl.lock.Lock()
+	defer cfgCtl.lock.Unlock()
 	tabWriter := tabwriter.NewWriter(w, 8, 0, 1, ' ', 0)
 	columnHeaders := []string{
 		"PriorityLevelName", // 1
@@ -105,8 +105,8 @@ func (cfgCtlr *configController) dumpQueues(w http.ResponseWriter, r *http.Reque
 		"VirtualStart",      // 5
 	}
 	tabPrint(tabWriter, rowForHeaders(columnHeaders))
-	endLine(tabWriter)
-	for _, plState := range cfgCtlr.priorityLevelStates {
+	endline(tabWriter)
+	for _, plState := range cfgCtl.priorityLevelStates {
 		if plState.queues == nil {
 			tabPrint(tabWriter, row(
 				plState.pl.Name, // 1
@@ -115,7 +115,7 @@ func (cfgCtlr *configController) dumpQueues(w http.ResponseWriter, r *http.Reque
 				"<none>",        // 4
 				"<none>",        // 5
 			))
-			endLine(tabWriter)
+			endline(tabWriter)
 			continue
 		}
 		queueSetDigest := plState.queues.Dump(false)
@@ -127,15 +127,15 @@ func (cfgCtlr *configController) dumpQueues(w http.ResponseWriter, r *http.Reque
 				q.ExecutingRequests, // 4
 				q.VirtualStart,      // 5
 			))
-			endLine(tabWriter)
+			endline(tabWriter)
 		}
 	}
 	runtime.HandleError(tabWriter.Flush())
 }
 
-func (cfgCtlr *configController) dumpRequests(w http.ResponseWriter, r *http.Request) {
-	cfgCtlr.lock.Lock()
-	defer cfgCtlr.lock.Unlock()
+func (cfgCtl *configController) dumpRequests(w http.ResponseWriter, r *http.Request) {
+	cfgCtl.lock.Lock()
+	defer cfgCtl.lock.Unlock()
 
 	includeRequestDetails := len(r.URL.Query().Get(queryIncludeRequestDetails)) > 0
 
@@ -149,7 +149,6 @@ func (cfgCtlr *configController) dumpRequests(w http.ResponseWriter, r *http.Req
 		"ArriveTime",          // 6
 	}))
 	if includeRequestDetails {
-		continueLine(tabWriter)
 		tabPrint(tabWriter, rowForHeaders([]string{
 			"UserName",    // 7
 			"Verb",        // 8
@@ -161,8 +160,8 @@ func (cfgCtlr *configController) dumpRequests(w http.ResponseWriter, r *http.Req
 			"SubResource", // 14
 		}))
 	}
-	endLine(tabWriter)
-	for _, plState := range cfgCtlr.priorityLevelStates {
+	endline(tabWriter)
+	for _, plState := range cfgCtl.priorityLevelStates {
 		if plState.queues == nil {
 			tabPrint(tabWriter, row(
 				plState.pl.Name, // 1
@@ -173,7 +172,6 @@ func (cfgCtlr *configController) dumpRequests(w http.ResponseWriter, r *http.Req
 				"<none>",        // 6
 			))
 			if includeRequestDetails {
-				continueLine(tabWriter)
 				tabPrint(tabWriter, row(
 					"<none>", // 7
 					"<none>", // 8
@@ -185,7 +183,7 @@ func (cfgCtlr *configController) dumpRequests(w http.ResponseWriter, r *http.Req
 					"<none>", // 14
 				))
 			}
-			endLine(tabWriter)
+			endline(tabWriter)
 			continue
 		}
 		queueSetDigest := plState.queues.Dump(includeRequestDetails)
@@ -200,7 +198,6 @@ func (cfgCtlr *configController) dumpRequests(w http.ResponseWriter, r *http.Req
 					r.ArriveTime,        // 6
 				))
 				if includeRequestDetails {
-					continueLine(tabWriter)
 					tabPrint(tabWriter, rowForRequestDetails(
 						r.UserName,              // 7
 						r.RequestInfo.Verb,      // 8
@@ -215,7 +212,7 @@ func (cfgCtlr *configController) dumpRequests(w http.ResponseWriter, r *http.Req
 						r.RequestInfo.Subresource, // 14
 					))
 				}
-				endLine(tabWriter)
+				endline(tabWriter)
 			}
 		}
 	}
@@ -226,12 +223,7 @@ func tabPrint(w io.Writer, row string) {
 	_, err := fmt.Fprint(w, row)
 	runtime.HandleError(err)
 }
-
-func continueLine(w io.Writer) {
-	_, err := fmt.Fprint(w, ",\t")
-	runtime.HandleError(err)
-}
-func endLine(w io.Writer) {
+func endline(w io.Writer) {
 	_, err := fmt.Fprint(w, "\n")
 	runtime.HandleError(err)
 }
@@ -277,14 +269,9 @@ func rowForRequestDetails(username, verb, path, namespace, name, apiVersion, res
 		username,
 		verb,
 		path,
-		namespace,
-		name,
-		apiVersion,
-		resource,
-		subResource,
 	)
 }
 
 func row(columns ...string) string {
-	return strings.Join(columns, ",\t")
+	return strings.Join(columns, ",\t") + ",\t"
 }

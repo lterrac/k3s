@@ -22,7 +22,7 @@ import (
 	"net/url"
 	"sort"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	kubetypes "k8s.io/apimachinery/pkg/types"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
@@ -148,11 +148,8 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxLinuxConfig(pod *v1.Pod) (
 	lc := &runtimeapi.LinuxPodSandboxConfig{
 		CgroupParent: cgroupParent,
 		SecurityContext: &runtimeapi.LinuxSandboxSecurityContext{
-			Privileged: kubecontainer.HasPrivilegedContainer(pod),
-
-			// Forcing sandbox to run as `runtime/default` allow users to
-			// use least privileged seccomp profiles at pod level. Issue #84623
-			SeccompProfilePath: v1.SeccompProfileRuntimeDefault,
+			Privileged:         kubecontainer.HasPrivilegedContainer(pod),
+			SeccompProfilePath: m.getSeccompProfileFromAnnotations(pod.Annotations, ""),
 		},
 	}
 

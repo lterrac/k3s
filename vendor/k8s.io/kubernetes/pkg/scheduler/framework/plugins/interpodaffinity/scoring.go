@@ -160,15 +160,9 @@ func (pl *InterPodAffinity) PreScore(
 		}
 	}
 
-	podInfo := framework.NewPodInfo(pod)
-	if podInfo.ParseError != nil {
-		// Ideally we never reach here, because errors will be caught by PreFilter
-		return framework.NewStatus(framework.Error, fmt.Sprintf("parsing pod: %+v", podInfo.ParseError))
-	}
-
 	state := &preScoreState{
 		topologyScore: make(map[string]map[string]int64),
-		podInfo:       podInfo,
+		podInfo:       framework.NewPodInfo(pod),
 	}
 
 	topoScores := make([]scoreMap, len(allNodes))

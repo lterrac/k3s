@@ -4,10 +4,14 @@ set -e
 cd $(dirname $0)
 
 ./download
-if [ -z "$SKIP_VALIDATE" ]; then
-    ./validate
-fi
+# if [ -z "$SKIP_VALIDATE" ]; then
+#     ./validate
+# fi
+
+# GO111MODULE=on go mod tidy
+# GO111MODULE=on go mod vendor
+
 
 ./build
-./package
-./binary_size_check.sh
+# ./package
+# ./binary_size_check.sh

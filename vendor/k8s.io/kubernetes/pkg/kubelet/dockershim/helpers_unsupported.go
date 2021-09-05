@@ -36,11 +36,6 @@ func (ds *dockerService) getSecurityOpts(seccompProfile string, separator rune) 
 	return nil, nil
 }
 
-func (ds *dockerService) getSandBoxSecurityOpts(separator rune) []string {
-	klog.Warningf("getSandBoxSecurityOpts is unsupported in this build")
-	return nil
-}
-
 func (ds *dockerService) updateCreateConfig(
 	createConfig *dockertypes.ContainerCreateConfig,
 	config *runtimeapi.ContainerConfig,

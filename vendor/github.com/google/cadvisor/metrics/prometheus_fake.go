@@ -19,7 +19,6 @@ import (
 	"time"
 
 	info "github.com/google/cadvisor/info/v1"
-	v2 "github.com/google/cadvisor/info/v2"
 )
 
 type testSubcontainersInfoProvider struct{}
@@ -265,9 +264,9 @@ func (p testSubcontainersInfoProvider) GetMachineInfo() (*info.MachineInfo, erro
 	}, nil
 }
 
-func (p testSubcontainersInfoProvider) GetRequestedContainersInfo(string, v2.RequestOptions) (map[string]*info.ContainerInfo, error) {
-	return map[string]*info.ContainerInfo{
-		"testcontainer": {
+func (p testSubcontainersInfoProvider) SubcontainersInfo(string, *info.ContainerInfoRequest) ([]*info.ContainerInfo, error) {
+	return []*info.ContainerInfo{
+		{
 			ContainerReference: info.ContainerReference{
 				Name:    "testcontainer",
 				Aliases: []string{"testcontaineralias"},
@@ -711,10 +710,10 @@ func (p *erroringSubcontainersInfoProvider) GetMachineInfo() (*info.MachineInfo,
 	return p.successfulProvider.GetMachineInfo()
 }
 
-func (p *erroringSubcontainersInfoProvider) GetRequestedContainersInfo(
-	a string, opt v2.RequestOptions) (map[string]*info.ContainerInfo, error) {
+func (p *erroringSubcontainersInfoProvider) SubcontainersInfo(
+	a string, r *info.ContainerInfoRequest) ([]*info.ContainerInfo, error) {
 	if p.shouldFail {
-		return map[string]*info.ContainerInfo{}, errors.New("Oops 3")
+		return []*info.ContainerInfo{}, errors.New("Oops 3")
 	}
-	return p.successfulProvider.GetRequestedContainersInfo(a, opt)
+	return p.successfulProvider.SubcontainersInfo(a, r)
 }

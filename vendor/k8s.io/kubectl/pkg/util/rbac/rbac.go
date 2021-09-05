@@ -18,7 +18,6 @@ package rbac
 
 import (
 	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"reflect"
 	"strings"
 )
@@ -43,13 +42,7 @@ func CompactRules(rules []rbacv1.PolicyRule) ([]rbacv1.PolicyRule, error) {
 				if existingRule.Verbs == nil {
 					existingRule.Verbs = []string{}
 				}
-				existingVerbs := sets.NewString(existingRule.Verbs...)
-				for _, verb := range rule.Verbs {
-					if !existingVerbs.Has(verb) {
-						existingRule.Verbs = append(existingRule.Verbs, verb)
-					}
-				}
-
+				existingRule.Verbs = append(existingRule.Verbs, rule.Verbs...)
 			} else {
 				// Copy the rule to accumulate matching simple resource rules into
 				simpleRules[resource] = rule.DeepCopy()

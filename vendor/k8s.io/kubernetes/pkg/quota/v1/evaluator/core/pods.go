@@ -30,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/admission"
-	"k8s.io/apiserver/pkg/util/feature"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	k8s_api_v1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	"k8s.io/kubernetes/pkg/apis/core/v1/helper"
@@ -147,7 +147,7 @@ func (p *podEvaluator) GroupResource() schema.GroupResource {
 // Handles returns true if the evaluator should handle the specified attributes.
 func (p *podEvaluator) Handles(a admission.Attributes) bool {
 	op := a.GetOperation()
-	if op == admission.Create {
+	if op == admission.Create || (utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) && op == admission.Update) {
 		return true
 	}
 	return false
@@ -353,10 +353,6 @@ func PodUsageFunc(obj runtime.Object, clock clock.Clock) (corev1.ResourceList, e
 		limits = quota.Max(limits, pod.Spec.InitContainers[i].Resources.Limits)
 	}
 
-	if feature.DefaultFeatureGate.Enabled(features.PodOverhead) {
-		requests = quota.Add(requests, pod.Spec.Overhead)
-		limits = quota.Add(limits, pod.Spec.Overhead)
-	}
 	result = quota.Add(result, podComputeUsageHelper(requests, limits))
 	return result, nil
 }

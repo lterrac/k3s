@@ -5,8 +5,9 @@ version: '3'
 services:
 
   server:
-    image: "rancher/k3s:${K3S_VERSION:-latest}"
-    command: server
+    image: "systemautoscaler/k3s:v1.19.13-k3s1-amd64"
+    # image: "systemautoscaler/myk3s:latest"
+    command: server --kube-apiserver-arg=feature-gates=InPlacePodVerticalScaling=true
     tmpfs:
     - /run
     - /var/run
@@ -23,7 +24,8 @@ services:
     - 6443:6443
 
   agent:
-    image: "rancher/k3s:${K3S_VERSION:-latest}"
+    # image: "systemautoscaler/k3s:v1.19.13-k3s1-amd64"
+    image: "systemautoscaler/myk3s:latest"
     tmpfs:
     - /run
     - /var/run

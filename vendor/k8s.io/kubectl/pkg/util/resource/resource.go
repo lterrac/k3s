@@ -57,6 +57,22 @@ func PodRequestsAndLimits(pod *corev1.Pod) (reqs, limits corev1.ResourceList) {
 	return
 }
 
+// PodResourceAllocations returns a dictionary of resources allocated to the containers of pod.
+func PodResourceAllocations(pod *corev1.Pod) (allocations corev1.ResourceList) {
+	allocations = corev1.ResourceList{}
+	for _, container := range pod.Spec.Containers {
+		addResourceList(allocations, container.ResourcesAllocated)
+	}
+	// init containers define the minimum of any resource
+	for _, container := range pod.Spec.InitContainers {
+		maxResourceList(allocations, container.Resources.Requests)
+	}
+	if pod.Spec.Overhead != nil {
+		addResourceList(allocations, pod.Spec.Overhead)
+	}
+	return
+}
+
 // addResourceList adds the resources in newList to list
 func addResourceList(list, new corev1.ResourceList) {
 	for name, quantity := range new {
@@ -107,6 +123,12 @@ func ExtractContainerResourceValue(fs *corev1.ResourceFieldSelector, container *
 		return convertResourceMemoryToString(container.Resources.Requests.Memory(), divisor)
 	case "requests.ephemeral-storage":
 		return convertResourceEphemeralStorageToString(container.Resources.Requests.StorageEphemeral(), divisor)
+	case "resourcesAllocated.cpu":
+		return convertResourceCPUToString(container.ResourcesAllocated.Cpu(), divisor)
+	case "resourcesAllocated.memory":
+		return convertResourceMemoryToString(container.ResourcesAllocated.Memory(), divisor)
+	case "resourcesAllocated.ephemeral-storage":
+		return convertResourceEphemeralStorageToString(container.ResourcesAllocated.StorageEphemeral(), divisor)
 	}
 
 	return "", fmt.Errorf("Unsupported container resource : %v", fs.Resource)

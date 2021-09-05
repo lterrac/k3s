@@ -5,8 +5,13 @@ cd $(dirname $0)/..
 
 . ./scripts/version.sh
 
+VERSION_TAG=v1.19.13
+VERSION=v1.19.13
+GIT_TAG=v1.19.13
+TREE_STATE=clean
+COMMIT=62d61c20c486e397d1fe4aee83237921c7640247
 GO=${GO-go}
-
+PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig"
 PKG="github.com/rancher/k3s"
 PKG_CONTAINERD="github.com/containerd/containerd"
 PKG_RANCHER_CONTAINERD="github.com/rancher/containerd"
@@ -17,7 +22,7 @@ buildDate=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 VENDOR_PREFIX="${PKG}/vendor/"
 VERSIONFLAGS="
     -X ${PKG}/pkg/version.Version=${VERSION}
-    -X ${PKG}/pkg/version.GitCommit=${COMMIT:0:8}
+    -X ${PKG}/pkg/version.GitCommit=${COMMIT}
 
     -X ${VENDOR_PREFIX}k8s.io/client-go/pkg/version.gitVersion=${VERSION}
     -X ${VENDOR_PREFIX}k8s.io/client-go/pkg/version.gitCommit=${COMMIT}
@@ -102,14 +107,20 @@ if [ ! -x ${INSTALLBIN}/cni ]; then
 fi
 # echo Building agent
 # CGO_ENABLED=1 "${GO}" build -tags "$TAGS" -ldflags "$VERSIONFLAGS $LDFLAGS $STATIC" -o bin/k3s-agent ./cmd/agent/main.go
+# echo FANCULO 2
 echo Building server
 CGO_ENABLED=1 "${GO}" build -tags "$TAGS" -ldflags "$VERSIONFLAGS $LDFLAGS $STATIC_SQLITE" -o bin/containerd ./cmd/server/main.go
-ln -s containerd ./bin/k3s-agent
-ln -s containerd ./bin/k3s-server
-ln -s containerd ./bin/k3s-etcd-snapshot
-ln -s containerd ./bin/kubectl
-ln -s containerd ./bin/crictl
-ln -s containerd ./bin/ctr
+CGO_ENABLED=1 "${GO}" build -tags "$TAGS" -ldflags "$VERSIONFLAGS $LDFLAGS $STATIC_SQLITE" -o k3s ./cmd/server/main.go
+mv k3s ./bin/k3s
+cd ./bin
+ln -s k3s k3s-agent
+ln -s k3s k3s-server
+ln -s k3s k3s-etcd-snapshot
+ln -s k3s kubectl
+ln -s k3s crictl
+ln -s k3s ctr
+cd ..
+
 #echo Building hyperkube
 #CGO_ENABLED=1 "${GO}" build -tags "$TAGS" -ldflags "$VERSIONFLAGS $LDFLAGS $STATIC_SQLITE" -o bin/hyperkube ./vendor/k8s.io/kubernetes/cmd/hyperkube/
 #echo Building ctr

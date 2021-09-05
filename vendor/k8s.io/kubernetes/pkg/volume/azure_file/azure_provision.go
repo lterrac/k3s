@@ -33,7 +33,6 @@ import (
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/legacy-cloud-providers/azure"
-	"k8s.io/legacy-cloud-providers/azure/clients/fileclient"
 	utilstrings "k8s.io/utils/strings"
 )
 
@@ -48,7 +47,7 @@ var (
 // azure cloud provider should implement it
 type azureCloudProvider interface {
 	// create a file share
-	CreateFileShare(account *azure.AccountOptions, fileShare *fileclient.ShareOptions) (string, string, error)
+	CreateFileShare(shareName, accountName, accountType, accountKind, resourceGroup, location string, protocol storage.EnabledProtocols, requestGiB int) (string, string, error)
 	// delete a file share
 	DeleteFileShare(resourceGroup, accountName, shareName string) error
 	// resize a file share
@@ -156,7 +155,7 @@ func (a *azureFileProvisioner) Provision(selectedNode *v1.Node, allowedTopologie
 		return nil, fmt.Errorf("%s does not support block volume provisioning", a.plugin.GetPluginName())
 	}
 
-	var sku, resourceGroup, location, account, shareName, customTags string
+	var sku, resourceGroup, location, account, shareName string
 
 	capacity := a.options.PVC.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
 	requestGiB, err := volumehelpers.RoundUpToGiBInt(capacity)
@@ -181,8 +180,6 @@ func (a *azureFileProvisioner) Provision(selectedNode *v1.Node, allowedTopologie
 			resourceGroup = v
 		case "sharename":
 			shareName = v
-		case "tags":
-			customTags = v
 		default:
 			return nil, fmt.Errorf("invalid option %q for volume plugin %s", k, a.plugin.GetPluginName())
 		}
@@ -192,16 +189,10 @@ func (a *azureFileProvisioner) Provision(selectedNode *v1.Node, allowedTopologie
 		return nil, fmt.Errorf("claim.Spec.Selector is not supported for dynamic provisioning on Azure file")
 	}
 
-	tags, err := azure.ConvertTagsToMap(customTags)
-	if err != nil {
-		return nil, err
-	}
-
 	if shareName == "" {
-		// File share name has a length limit of 63, it cannot contain two consecutive '-'s, and all letters must be lower case.
+		// File share name has a length limit of 63, and it cannot contain two consecutive '-'s.
 		name := util.GenerateVolumeName(a.options.ClusterName, a.options.PVName, 63)
 		shareName = strings.Replace(name, "--", "-", -1)
-		shareName = strings.ToLower(shareName)
 	}
 
 	if resourceGroup == "" {
@@ -213,23 +204,7 @@ func (a *azureFileProvisioner) Provision(selectedNode *v1.Node, allowedTopologie
 	if strings.HasPrefix(strings.ToLower(sku), "premium") {
 		accountKind = string(storage.FileStorage)
 	}
-
-	accountOptions := &azure.AccountOptions{
-		Name:          account,
-		Type:          sku,
-		Kind:          accountKind,
-		ResourceGroup: resourceGroup,
-		Location:      location,
-		Tags:          tags,
-	}
-
-	shareOptions := &fileclient.ShareOptions{
-		Name:       shareName,
-		Protocol:   storage.SMB,
-		RequestGiB: requestGiB,
-	}
-
-	account, key, err := a.azureProvider.CreateFileShare(accountOptions, shareOptions)
+	account, key, err := a.azureProvider.CreateFileShare(shareName, account, sku, accountKind, resourceGroup, location, storage.SMB, requestGiB)
 	if err != nil {
 		return nil, err
 	}

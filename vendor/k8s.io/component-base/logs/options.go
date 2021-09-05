@@ -34,8 +34,8 @@ const (
 
 // List of logs (k8s.io/klog + k8s.io/component-base/logs) flags supported by all logging formats
 var supportedLogsFlags = map[string]struct{}{
-	"v": {},
-	// TODO: support vmodule after 1.19 Alpha
+	"v":       {},
+	"vmodule": {},
 }
 
 // Options has klog format parameters
@@ -50,34 +50,12 @@ func NewOptions() *Options {
 	}
 }
 
-// Validate verifies if any unsupported flag is set
-// for non-default logging format
+// Validate check LogFormat in registry or not
 func (o *Options) Validate() []error {
-	errs := []error{}
-	if o.LogFormat != defaultLogFormat {
-		allFlags := unsupportedLoggingFlags()
-		for _, fname := range allFlags {
-			if flagIsSet(fname) {
-				errs = append(errs, fmt.Errorf("non-default logging format doesn't honor flag: %s", fname))
-			}
-		}
-	}
 	if _, err := o.Get(); err != nil {
-		errs = append(errs, fmt.Errorf("unsupported log format: %s", o.LogFormat))
+		return []error{fmt.Errorf("unsupported log format: %s", o.LogFormat)}
 	}
-	return errs
-}
-
-func flagIsSet(name string) bool {
-	f := flag.Lookup(name)
-	if f != nil {
-		return f.DefValue != f.Value.String()
-	}
-	pf := pflag.Lookup(name)
-	if pf != nil {
-		return pf.DefValue != pf.Value.String()
-	}
-	panic("failed to lookup unsupported log flag")
+	return nil
 }
 
 // AddFlags add logging-format flag

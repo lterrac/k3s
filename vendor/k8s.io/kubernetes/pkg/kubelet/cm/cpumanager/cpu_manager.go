@@ -42,7 +42,7 @@ import (
 type ActivePodsFunc func() []*v1.Pod
 
 type runtimeService interface {
-	UpdateContainerResources(id string, resources *runtimeapi.LinuxContainerResources) error
+	UpdateContainerResources(id string, resources *runtimeapi.ContainerResources) error
 }
 
 type policyName string
@@ -126,7 +126,7 @@ func (s *sourcesReadyStub) AddSource(source string) {}
 func (s *sourcesReadyStub) AllReady() bool          { return true }
 
 // NewManager creates new cpu manager based on provided policy
-func NewManager(cpuPolicyName string, reconcilePeriod time.Duration, machineInfo *cadvisorapi.MachineInfo, specificCPUs cpuset.CPUSet, nodeAllocatableReservation v1.ResourceList, stateFileDirectory string, affinity topologymanager.Store) (Manager, error) {
+func NewManager(cpuPolicyName string, reconcilePeriod time.Duration, machineInfo *cadvisorapi.MachineInfo, numaNodeInfo topology.NUMANodeInfo, specificCPUs cpuset.CPUSet, nodeAllocatableReservation v1.ResourceList, stateFileDirectory string, affinity topologymanager.Store) (Manager, error) {
 	var topo *topology.CPUTopology
 	var policy Policy
 
@@ -137,7 +137,7 @@ func NewManager(cpuPolicyName string, reconcilePeriod time.Duration, machineInfo
 
 	case PolicyStatic:
 		var err error
-		topo, err = topology.Discover(machineInfo)
+		topo, err = topology.Discover(machineInfo, numaNodeInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -386,7 +386,6 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
 				continue
 			}
 
-			m.Lock()
 			if cstatus.State.Terminated != nil {
 				// The container is terminated but we can't call m.RemoveContainer()
 				// here because it could remove the allocated cpuset for the container
@@ -397,7 +396,6 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
 				if err == nil {
 					klog.Warningf("[cpumanager] reconcileState: ignoring terminated container (pod: %s, container id: %s)", pod.Name, containerID)
 				}
-				m.Unlock()
 				continue
 			}
 
@@ -405,7 +403,6 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
 			// Idempotently add it to the containerMap incase it is missing.
 			// This can happen after a kubelet restart, for example.
 			m.containerMap.Add(string(pod.UID), container.Name, containerID)
-			m.Unlock()
 
 			cset := m.state.GetCPUSetOrDefault(string(pod.UID), container.Name)
 			if cset.IsEmpty() {
@@ -460,7 +457,11 @@ func (m *manager) updateContainerCPUSet(containerID string, cpus cpuset.CPUSet) 
 	// this patch-like partial resources.
 	return m.containerRuntime.UpdateContainerResources(
 		containerID,
-		&runtimeapi.LinuxContainerResources{
-			CpusetCpus: cpus.String(),
+		&runtimeapi.ContainerResources{
+			R: &runtimeapi.ContainerResources_Linux{
+				Linux: &runtimeapi.LinuxContainerResources{
+					CpusetCpus: cpus.String(),
+				},
+			},
 		})
 }

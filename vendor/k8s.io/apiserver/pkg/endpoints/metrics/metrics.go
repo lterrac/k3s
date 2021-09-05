@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/validation"
 	"k8s.io/apimachinery/pkg/types"
 	utilsets "k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apiserver/pkg/audit"
 	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/features"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -122,15 +121,7 @@ var (
 			Help:           "Number of requests dropped with 'Try again later' response",
 			StabilityLevel: compbasemetrics.ALPHA,
 		},
-		[]string{"request_kind"},
-	)
-	// TLSHandshakeErrors is a number of requests dropped with 'TLS handshake error from' error
-	TLSHandshakeErrors = compbasemetrics.NewCounter(
-		&compbasemetrics.CounterOpts{
-			Name:           "apiserver_tls_handshake_errors_total",
-			Help:           "Number of requests dropped with 'TLS handshake error from' error",
-			StabilityLevel: compbasemetrics.ALPHA,
-		},
+		[]string{"requestKind"},
 	)
 	// RegisteredWatchers is a number of currently registered watchers splitted by resource.
 	RegisteredWatchers = compbasemetrics.NewGaugeVec(
@@ -166,15 +157,7 @@ var (
 			Help:           "Maximal number of currently used inflight request limit of this apiserver per request kind in last second.",
 			StabilityLevel: compbasemetrics.ALPHA,
 		},
-		[]string{"request_kind"},
-	)
-	currentInqueueRequests = compbasemetrics.NewGaugeVec(
-		&compbasemetrics.GaugeOpts{
-			Name:           "apiserver_current_inqueue_requests",
-			Help:           "Maximal number of queued requests in this apiserver per request kind in last second.",
-			StabilityLevel: compbasemetrics.ALPHA,
-		},
-		[]string{"request_kind"},
+		[]string{"requestKind"},
 	)
 
 	requestTerminationsTotal = compbasemetrics.NewCounterVec(
@@ -194,12 +177,10 @@ var (
 		requestLatencies,
 		responseSizes,
 		DroppedRequests,
-		TLSHandshakeErrors,
 		RegisteredWatchers,
 		WatchEvents,
 		WatchEventsSizes,
 		currentInflightRequests,
-		currentInqueueRequests,
 		requestTerminationsTotal,
 	}
 
@@ -240,21 +221,6 @@ const (
 	ReadOnlyKind = "readOnly"
 	// MutatingKind is a string identifying mutating request kind
 	MutatingKind = "mutating"
-
-	// WaitingPhase is the phase value for a request waiting in a queue
-	WaitingPhase = "waiting"
-	// ExecutingPhase is the phase value for an executing request
-	ExecutingPhase = "executing"
-)
-
-const (
-	// deprecatedAnnotationKey is a key for an audit annotation set to
-	// "true" on requests made to deprecated API versions
-	deprecatedAnnotationKey = "k8s.io/deprecated"
-	// removedReleaseAnnotationKey is a key for an audit annotation set to
-	// the target removal release, in "<major>.<minor>" format,
-	// on requests made to deprecated API versions with a target removal release
-	removedReleaseAnnotationKey = "k8s.io/removed-release"
 )
 
 var registerMetrics sync.Once
@@ -275,19 +241,9 @@ func Reset() {
 	}
 }
 
-// UpdateInflightRequestMetrics reports concurrency metrics classified by
-// mutating vs Readonly.
-func UpdateInflightRequestMetrics(phase string, nonmutating, mutating int) {
-	for _, kc := range []struct {
-		kind  string
-		count int
-	}{{ReadOnlyKind, nonmutating}, {MutatingKind, mutating}} {
-		if phase == ExecutingPhase {
-			currentInflightRequests.WithLabelValues(kc.kind).Set(float64(kc.count))
-		} else {
-			currentInqueueRequests.WithLabelValues(kc.kind).Set(float64(kc.count))
-		}
-	}
+func UpdateInflightRequestMetrics(nonmutating, mutating int) {
+	currentInflightRequests.WithLabelValues(ReadOnlyKind).Set(float64(nonmutating))
+	currentInflightRequests.WithLabelValues(MutatingKind).Set(float64(mutating))
 }
 
 // RecordRequestTermination records that the request was terminated early as part of a resource
@@ -350,10 +306,6 @@ func MonitorRequest(req *http.Request, verb, group, version, resource, subresour
 	requestCounter.WithLabelValues(reportedVerb, dryRun, group, version, resource, subresource, scope, component, cleanContentType, codeToString(httpCode)).Inc()
 	if deprecated {
 		deprecatedRequestGauge.WithLabelValues(group, version, resource, subresource, removedRelease).Set(1)
-		audit.AddAuditAnnotation(req.Context(), deprecatedAnnotationKey, "true")
-		if len(removedRelease) > 0 {
-			audit.AddAuditAnnotation(req.Context(), removedReleaseAnnotationKey, removedRelease)
-		}
 	}
 	requestLatencies.WithLabelValues(reportedVerb, dryRun, group, version, resource, subresource, scope, component).Observe(elapsedSeconds)
 	// We are only interested in response sizes of read requests.

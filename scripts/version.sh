@@ -39,13 +39,17 @@ fi
 
 VERSION_CNIPLUGINS="v0.8.6-k3s1"
 
-if [[ -n "$GIT_TAG" ]]; then
-    if [[ ! "$GIT_TAG" =~ ^"$VERSION_K8S"[+-] ]]; then
-        echo "Tagged version '$GIT_TAG' does not match expected version '$VERSION_K8S[+-]*'" >&2
-        exit 1
-    fi
-    VERSION=$GIT_TAG
-else
-    VERSION="$VERSION_K8S+k3s-${COMMIT:0:8}$DIRTY"
-fi
-VERSION_TAG="$(sed -e 's/+/-/g' <<< "$VERSION")"
+# if [[ -n "$GIT_TAG" ]]; then
+#     if [[ ! "$GIT_TAG" =~ ^"$VERSION_K8S"[+-] ]]; then
+#         echo "Tagged version '$GIT_TAG' does not match expected version '$VERSION_K8S[+-]*'" >&2
+#         exit 1
+#     fi
+#     VERSION=$GIT_TAG
+# else
+#     VERSION="$VERSION_K8S+k3s-${COMMIT:0:8}$DIRTY"
+# fi
+VERSION_TAG=v1.19.13
+VERSION=v1.19.13
+GIT_TAG=v1.19.13
+TREE_STATE=clean
+COMMIT=62d61c20c486e397d1fe4aee83237921c7640247

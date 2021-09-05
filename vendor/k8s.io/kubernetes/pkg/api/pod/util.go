@@ -87,23 +87,11 @@ func VisitContainers(podSpec *api.PodSpec, mask ContainerType, visitor Container
 // Visitor is called with each object name, and returns true if visiting should continue
 type Visitor func(name string) (shouldContinue bool)
 
-func skipEmptyNames(visitor Visitor) Visitor {
-	return func(name string) bool {
-		if len(name) == 0 {
-			// continue visiting
-			return true
-		}
-		// delegate to visitor
-		return visitor(name)
-	}
-}
-
 // VisitPodSecretNames invokes the visitor function with the name of every secret
 // referenced by the pod spec. If visitor returns false, visiting is short-circuited.
 // Transitive references (e.g. pod -> pvc -> pv -> secret) are not visited.
 // Returns true if visiting completed, false if visiting was short-circuited.
 func VisitPodSecretNames(pod *api.Pod, visitor Visitor, containerType ContainerType) bool {
-	visitor = skipEmptyNames(visitor)
 	for _, reference := range pod.Spec.ImagePullSecrets {
 		if !visitor(reference.Name) {
 			return false
@@ -192,7 +180,6 @@ func visitContainerSecretNames(container *api.Container, visitor Visitor) bool {
 // Transitive references (e.g. pod -> pvc -> pv -> secret) are not visited.
 // Returns true if visiting completed, false if visiting was short-circuited.
 func VisitPodConfigmapNames(pod *api.Pod, visitor Visitor, containerType ContainerType) bool {
-	visitor = skipEmptyNames(visitor)
 	VisitContainers(&pod.Spec, containerType, func(c *api.Container, containerType ContainerType) bool {
 		return visitContainerConfigmapNames(c, visitor)
 	})
@@ -444,7 +431,6 @@ func dropDisabledFields(
 	dropDisabledProcMountField(podSpec, oldPodSpec)
 
 	dropDisabledCSIVolumeSourceAlphaFields(podSpec, oldPodSpec)
-	dropDisabledEphemeralVolumeSourceAlphaFields(podSpec, oldPodSpec)
 
 	if !utilfeature.DefaultFeatureGate.Enabled(features.NonPreemptingPriority) &&
 		!podPriorityInUse(oldPodSpec) {
@@ -458,6 +444,14 @@ func dropDisabledFields(
 		podSpec.SetHostnameAsFQDN = nil
 	}
 
+	if !utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) && !inPlacePodVerticalScalingInUse(oldPodSpec) {
+		// Drop ResourcesAllocated and ResizePolicy fields. Don't drop updates to Resources field because
+		// template spec Resources field is mutable for certain controllers. Let ValidatePodUpdate handle it.
+		for i := range podSpec.Containers {
+			podSpec.Containers[i].ResourcesAllocated = nil
+			podSpec.Containers[i].ResizePolicy = nil
+		}
+	}
 }
 
 // dropDisabledRunAsGroupField removes disabled fields from PodSpec related
@@ -509,16 +503,6 @@ func dropDisabledCSIVolumeSourceAlphaFields(podSpec, oldPodSpec *api.PodSpec) {
 	if !utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) && !csiInUse(oldPodSpec) {
 		for i := range podSpec.Volumes {
 			podSpec.Volumes[i].CSI = nil
-		}
-	}
-}
-
-// dropDisabledEphemeralVolumeSourceAlphaFields removes disabled alpha fields from []EphemeralVolumeSource.
-// This should be called from PrepareForCreate/PrepareForUpdate for all pod specs resources containing a EphemeralVolumeSource
-func dropDisabledEphemeralVolumeSourceAlphaFields(podSpec, oldPodSpec *api.PodSpec) {
-	if !utilfeature.DefaultFeatureGate.Enabled(features.GenericEphemeralVolume) && !csiInUse(oldPodSpec) {
-		for i := range podSpec.Volumes {
-			podSpec.Volumes[i].Ephemeral = nil
 		}
 	}
 }
@@ -581,6 +565,22 @@ func overheadInUse(podSpec *api.PodSpec) bool {
 		return true
 	}
 	return false
+}
+
+// inPlacePodVerticalScalingInUse returns true if the pod spec is non-nil and has ResizePolicy or ResourcesAllocated set
+func inPlacePodVerticalScalingInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+	var inUse bool
+	VisitContainers(podSpec, AllContainers, func(c *api.Container, containerType ContainerType) bool {
+		if (c.ResourcesAllocated != nil && len(c.ResourcesAllocated) > 0) || len(c.ResizePolicy) > 0 {
+			inUse = true
+			return false
+		}
+		return true
+	})
+	return inUse
 }
 
 // procMountInUse returns true if the pod spec is non-nil and has a SecurityContext's ProcMount field set to a non-default value
@@ -757,59 +757,4 @@ func setHostnameAsFQDNInUse(podSpec *api.PodSpec) bool {
 		return false
 	}
 	return *podSpec.SetHostnameAsFQDN
-}
-
-// SeccompAnnotationForField takes a pod seccomp profile field and returns the
-// converted annotation value
-func SeccompAnnotationForField(field *api.SeccompProfile) string {
-	// If only seccomp fields are specified, add the corresponding annotations.
-	// This ensures that the fields are enforced even if the node version
-	// trails the API version
-	switch field.Type {
-	case api.SeccompProfileTypeUnconfined:
-		return v1.SeccompProfileNameUnconfined
-
-	case api.SeccompProfileTypeRuntimeDefault:
-		return v1.SeccompProfileRuntimeDefault
-
-	case api.SeccompProfileTypeLocalhost:
-		if field.LocalhostProfile != nil {
-			return v1.SeccompLocalhostProfileNamePrefix + *field.LocalhostProfile
-		}
-	}
-
-	// we can only reach this code path if the LocalhostProfile is nil but the
-	// provided field type is SeccompProfileTypeLocalhost or if an unrecognized
-	// type is specified
-	return ""
-}
-
-// SeccompFieldForAnnotation takes a pod annotation and returns the converted
-// seccomp profile field.
-func SeccompFieldForAnnotation(annotation string) *api.SeccompProfile {
-	// If only seccomp annotations are specified, copy the values into the
-	// corresponding fields. This ensures that existing applications continue
-	// to enforce seccomp, and prevents the kubelet from needing to resolve
-	// annotations & fields.
-	if annotation == v1.SeccompProfileNameUnconfined {
-		return &api.SeccompProfile{Type: api.SeccompProfileTypeUnconfined}
-	}
-
-	if annotation == api.SeccompProfileRuntimeDefault || annotation == api.DeprecatedSeccompProfileDockerDefault {
-		return &api.SeccompProfile{Type: api.SeccompProfileTypeRuntimeDefault}
-	}
-
-	if strings.HasPrefix(annotation, v1.SeccompLocalhostProfileNamePrefix) {
-		localhostProfile := strings.TrimPrefix(annotation, v1.SeccompLocalhostProfileNamePrefix)
-		if localhostProfile != "" {
-			return &api.SeccompProfile{
-				Type:             api.SeccompProfileTypeLocalhost,
-				LocalhostProfile: &localhostProfile,
-			}
-		}
-	}
-
-	// we can only reach this code path if the localhostProfile name has a zero
-	// length or if the annotation has an unrecognized value
-	return nil
 }

@@ -1,8 +1,5 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
-approvers:
-- sig-storage-api-approvers
 reviewers:
-- sig-storage-api-reviewers
-labels:
-- sig/storage
+- deads2k
+- mbohlool

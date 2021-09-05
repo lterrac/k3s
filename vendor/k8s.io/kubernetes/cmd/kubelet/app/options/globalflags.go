@@ -28,6 +28,10 @@ import (
 	"k8s.io/component-base/logs"
 	"k8s.io/component-base/version/verflag"
 	"k8s.io/klog/v2"
+
+	// ensure libs have a chance to globally register their flags
+	_ "k8s.io/kubernetes/pkg/credentialprovider/azure"
+	_ "k8s.io/kubernetes/pkg/credentialprovider/gcp"
 )
 
 // AddGlobalFlags explicitly registers flags that libraries (glog, verflag, etc.) register
@@ -36,6 +40,7 @@ import (
 func AddGlobalFlags(fs *pflag.FlagSet) {
 	addKlogFlags(fs)
 	addCadvisorFlags(fs)
+	addCredentialProviderFlags(fs)
 	verflag.AddFlags(fs)
 	logs.AddFlags(fs)
 }
@@ -79,7 +84,9 @@ func addCredentialProviderFlags(fs *pflag.FlagSet) {
 	global := pflag.CommandLine
 	local := pflag.NewFlagSet(os.Args[0], pflag.ExitOnError)
 
-	addLegacyCloudProviderCredentialProviderFlags(global, local)
+	// TODO(#58034): This is not a static file, so it's not quite as straightforward as --google-json-key.
+	// We need to figure out how ACR users can dynamically provide pull credentials before we can deprecate this.
+	pflagRegister(global, local, "azure-container-registry-config")
 
 	fs.AddFlagSet(local)
 }

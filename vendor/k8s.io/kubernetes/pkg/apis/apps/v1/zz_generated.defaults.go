@@ -94,13 +94,6 @@ func SetObjectDefaults_DaemonSet(in *v1.DaemonSet) {
 		if a.VolumeSource.ScaleIO != nil {
 			corev1.SetDefaults_ScaleIOVolumeSource(a.VolumeSource.ScaleIO)
 		}
-		if a.VolumeSource.Ephemeral != nil {
-			if a.VolumeSource.Ephemeral.VolumeClaimTemplate != nil {
-				corev1.SetDefaults_PersistentVolumeClaimSpec(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec)
-				corev1.SetDefaults_ResourceList(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec.Resources.Limits)
-				corev1.SetDefaults_ResourceList(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec.Resources.Requests)
-			}
-		}
 	}
 	for i := range in.Spec.Template.Spec.InitContainers {
 		a := &in.Spec.Template.Spec.InitContainers[i]
@@ -119,6 +112,7 @@ func SetObjectDefaults_DaemonSet(in *v1.DaemonSet) {
 		}
 		corev1.SetDefaults_ResourceList(&a.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -167,6 +161,7 @@ func SetObjectDefaults_DaemonSet(in *v1.DaemonSet) {
 		}
 		corev1.SetDefaults_ResourceList(&a.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -214,6 +209,7 @@ func SetObjectDefaults_DaemonSet(in *v1.DaemonSet) {
 		}
 		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.ResourcesAllocated)
 		if a.EphemeralContainerCommon.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.EphemeralContainerCommon.LivenessProbe)
 			if a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet != nil {
@@ -308,13 +304,6 @@ func SetObjectDefaults_Deployment(in *v1.Deployment) {
 		if a.VolumeSource.ScaleIO != nil {
 			corev1.SetDefaults_ScaleIOVolumeSource(a.VolumeSource.ScaleIO)
 		}
-		if a.VolumeSource.Ephemeral != nil {
-			if a.VolumeSource.Ephemeral.VolumeClaimTemplate != nil {
-				corev1.SetDefaults_PersistentVolumeClaimSpec(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec)
-				corev1.SetDefaults_ResourceList(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec.Resources.Limits)
-				corev1.SetDefaults_ResourceList(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec.Resources.Requests)
-			}
-		}
 	}
 	for i := range in.Spec.Template.Spec.InitContainers {
 		a := &in.Spec.Template.Spec.InitContainers[i]
@@ -333,6 +322,7 @@ func SetObjectDefaults_Deployment(in *v1.Deployment) {
 		}
 		corev1.SetDefaults_ResourceList(&a.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -381,6 +371,7 @@ func SetObjectDefaults_Deployment(in *v1.Deployment) {
 		}
 		corev1.SetDefaults_ResourceList(&a.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -428,6 +419,7 @@ func SetObjectDefaults_Deployment(in *v1.Deployment) {
 		}
 		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.ResourcesAllocated)
 		if a.EphemeralContainerCommon.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.EphemeralContainerCommon.LivenessProbe)
 			if a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet != nil {
@@ -522,13 +514,6 @@ func SetObjectDefaults_ReplicaSet(in *v1.ReplicaSet) {
 		if a.VolumeSource.ScaleIO != nil {
 			corev1.SetDefaults_ScaleIOVolumeSource(a.VolumeSource.ScaleIO)
 		}
-		if a.VolumeSource.Ephemeral != nil {
-			if a.VolumeSource.Ephemeral.VolumeClaimTemplate != nil {
-				corev1.SetDefaults_PersistentVolumeClaimSpec(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec)
-				corev1.SetDefaults_ResourceList(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec.Resources.Limits)
-				corev1.SetDefaults_ResourceList(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec.Resources.Requests)
-			}
-		}
 	}
 	for i := range in.Spec.Template.Spec.InitContainers {
 		a := &in.Spec.Template.Spec.InitContainers[i]
@@ -547,6 +532,7 @@ func SetObjectDefaults_ReplicaSet(in *v1.ReplicaSet) {
 		}
 		corev1.SetDefaults_ResourceList(&a.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -595,6 +581,7 @@ func SetObjectDefaults_ReplicaSet(in *v1.ReplicaSet) {
 		}
 		corev1.SetDefaults_ResourceList(&a.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -642,6 +629,7 @@ func SetObjectDefaults_ReplicaSet(in *v1.ReplicaSet) {
 		}
 		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.ResourcesAllocated)
 		if a.EphemeralContainerCommon.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.EphemeralContainerCommon.LivenessProbe)
 			if a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet != nil {
@@ -736,13 +724,6 @@ func SetObjectDefaults_StatefulSet(in *v1.StatefulSet) {
 		if a.VolumeSource.ScaleIO != nil {
 			corev1.SetDefaults_ScaleIOVolumeSource(a.VolumeSource.ScaleIO)
 		}
-		if a.VolumeSource.Ephemeral != nil {
-			if a.VolumeSource.Ephemeral.VolumeClaimTemplate != nil {
-				corev1.SetDefaults_PersistentVolumeClaimSpec(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec)
-				corev1.SetDefaults_ResourceList(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec.Resources.Limits)
-				corev1.SetDefaults_ResourceList(&a.VolumeSource.Ephemeral.VolumeClaimTemplate.Spec.Resources.Requests)
-			}
-		}
 	}
 	for i := range in.Spec.Template.Spec.InitContainers {
 		a := &in.Spec.Template.Spec.InitContainers[i]
@@ -761,6 +742,7 @@ func SetObjectDefaults_StatefulSet(in *v1.StatefulSet) {
 		}
 		corev1.SetDefaults_ResourceList(&a.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -809,6 +791,7 @@ func SetObjectDefaults_StatefulSet(in *v1.StatefulSet) {
 		}
 		corev1.SetDefaults_ResourceList(&a.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -856,6 +839,7 @@ func SetObjectDefaults_StatefulSet(in *v1.StatefulSet) {
 		}
 		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Requests)
+		corev1.SetDefaults_ResourceList(&a.EphemeralContainerCommon.ResourcesAllocated)
 		if a.EphemeralContainerCommon.LivenessProbe != nil {
 			corev1.SetDefaults_Probe(a.EphemeralContainerCommon.LivenessProbe)
 			if a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet != nil {
@@ -891,7 +875,6 @@ func SetObjectDefaults_StatefulSet(in *v1.StatefulSet) {
 	for i := range in.Spec.VolumeClaimTemplates {
 		a := &in.Spec.VolumeClaimTemplates[i]
 		corev1.SetDefaults_PersistentVolumeClaim(a)
-		corev1.SetDefaults_PersistentVolumeClaimSpec(&a.Spec)
 		corev1.SetDefaults_ResourceList(&a.Spec.Resources.Limits)
 		corev1.SetDefaults_ResourceList(&a.Spec.Resources.Requests)
 		corev1.SetDefaults_ResourceList(&a.Status.Capacity)

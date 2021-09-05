@@ -48,17 +48,17 @@ const (
 	aggregatedDiscoveryTimeout = 5 * time.Second
 )
 
-type certKeyFunc func() ([]byte, []byte)
-
 // proxyHandler provides a http.Handler which will proxy traffic to locations
 // specified by items implementing Redirector.
 type proxyHandler struct {
 	// localDelegate is used to satisfy local APIServices
 	localDelegate http.Handler
 
-	// proxyCurrentCertKeyContent holds the client cert used to identify this proxy. Backing APIServices use this to confirm the proxy's identity
-	proxyCurrentCertKeyContent certKeyFunc
-	proxyTransport             *http.Transport
+	// proxyClientCert/Key are the client cert used to identify this proxy. Backing APIServices use
+	// this to confirm the proxy's identity
+	proxyClientCert []byte
+	proxyClientKey  []byte
+	proxyTransport  *http.Transport
 
 	// Endpoints based routing to map from cluster IP to routable IP
 	serviceResolver ServiceResolver
@@ -237,7 +237,7 @@ func (r *responder) Object(statusCode int, obj runtime.Object) {
 }
 
 func (r *responder) Error(_ http.ResponseWriter, _ *http.Request, err error) {
-	http.Error(r.w, err.Error(), http.StatusServiceUnavailable)
+	http.Error(r.w, err.Error(), http.StatusInternalServerError)
 }
 
 // these methods provide locked access to fields
@@ -248,16 +248,14 @@ func (r *proxyHandler) updateAPIService(apiService *apiregistrationv1api.APIServ
 		return
 	}
 
-	proxyClientCert, proxyClientKey := r.proxyCurrentCertKeyContent()
-
 	newInfo := proxyHandlingInfo{
 		name: apiService.Name,
 		restConfig: &restclient.Config{
 			TLSClientConfig: restclient.TLSClientConfig{
 				Insecure:   apiService.Spec.InsecureSkipTLSVerify,
 				ServerName: apiService.Spec.Service.Name + "." + apiService.Spec.Service.Namespace + ".svc",
-				CertData:   proxyClientCert,
-				KeyData:    proxyClientKey,
+				CertData:   r.proxyClientCert,
+				KeyData:    r.proxyClientKey,
 				CAData:     apiService.Spec.CABundle,
 			},
 		},

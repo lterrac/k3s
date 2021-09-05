@@ -33,7 +33,6 @@ import (
 	cgroupfs "github.com/opencontainers/runc/libcontainer/cgroups/fs"
 	cgroupfs2 "github.com/opencontainers/runc/libcontainer/cgroups/fs2"
 	"github.com/opencontainers/runc/libcontainer/configs"
-	libcontainersystem "github.com/opencontainers/runc/libcontainer/system"
 	"k8s.io/klog/v2"
 	utilio "k8s.io/utils/io"
 	"k8s.io/utils/mount"
@@ -53,6 +52,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/cadvisor"
 	"k8s.io/kubernetes/pkg/kubelet/cm/containermap"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager"
+	cputopology "k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
 	"k8s.io/kubernetes/pkg/kubelet/cm/devicemanager"
 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager"
 	cmutil "k8s.io/kubernetes/pkg/kubelet/cm/util"
@@ -171,7 +171,7 @@ func validateSystemRequirements(mountUtil mount.Interface) (features, error) {
 		return f, nil
 	}
 
-	expectedCgroups := sets.NewString("cpu", "cpuacct", "memory")
+	expectedCgroups := sets.NewString("cpu", "cpuacct", "cpuset", "memory")
 	for _, mountPoint := range mountPoints {
 		if mountPoint.Type == cgroupMountType {
 			for _, opt := range mountPoint.Opts {
@@ -238,6 +238,13 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 	if err != nil {
 		return nil, err
 	}
+	// Correct NUMA information is currently missing from cadvisor's
+	// MachineInfo struct, so we use the CPUManager's internal logic for
+	// gathering NUMANodeInfo to pass to components that care about it.
+	numaNodeInfo, err := cputopology.GetNUMANodeInfo()
+	if err != nil {
+		return nil, err
+	}
 	capacity := cadvisor.CapacityFromMachineInfo(machineInfo)
 	for k, v := range capacity {
 		internalCapacity[k] = v
@@ -251,21 +258,9 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 
 	// Turn CgroupRoot from a string (in cgroupfs path format) to internal CgroupName
 	cgroupRoot := ParseCgroupfsToCgroupName(nodeConfig.CgroupRoot)
-	cgroupManager, err := NewCgroupManager(subsystems, nodeConfig.CgroupDriver, nodeConfig.Rootless)
-	if err != nil {
-		return nil, err
-	}
+	cgroupManager := NewCgroupManager(subsystems, nodeConfig.CgroupDriver)
 	// Check if Cgroup-root actually exists on the node
 	if nodeConfig.CgroupsPerQOS {
-		if nodeConfig.CgroupDriver == noneDriver {
-			return nil, fmt.Errorf("invalid configuration: cgroups-per-qos is not supported for %s cgroup driver", nodeConfig.CgroupDriver)
-		}
-
-		if nodeConfig.Rootless {
-			// TODO(AkihiroSuda): support rootless
-			return nil, fmt.Errorf("invalid configuration: cgroups-per-qos is not supported for rootless")
-		}
-
 		// this does default to / when enabled, but this tests against regressions.
 		if nodeConfig.CgroupRoot == "" {
 			return nil, fmt.Errorf("invalid configuration: cgroups-per-qos was specified and cgroup-root was not specified. To enable the QoS cgroup hierarchy you need to specify a valid cgroup-root")
@@ -305,7 +300,7 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 
 	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.TopologyManager) {
 		cm.topologyManager, err = topologymanager.NewManager(
-			machineInfo.Topology,
+			numaNodeInfo,
 			nodeConfig.ExperimentalTopologyManagerPolicy,
 		)
 
@@ -320,7 +315,7 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 
 	klog.Infof("Creating device plugin manager: %t", devicePluginEnabled)
 	if devicePluginEnabled {
-		cm.deviceManager, err = devicemanager.NewManagerImpl(machineInfo.Topology, cm.topologyManager)
+		cm.deviceManager, err = devicemanager.NewManagerImpl(numaNodeInfo, cm.topologyManager)
 		cm.topologyManager.AddHintProvider(cm.deviceManager)
 	} else {
 		cm.deviceManager, err = devicemanager.NewManagerStub()
@@ -335,6 +330,7 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
 			nodeConfig.ExperimentalCPUManagerPolicy,
 			nodeConfig.ExperimentalCPUManagerReconcilePeriod,
 			machineInfo,
+			numaNodeInfo,
 			nodeConfig.NodeAllocatableConfig.ReservedSystemCPUs,
 			cm.GetNodeAllocatableReservation(),
 			nodeConfig.KubeletRootDir,
@@ -365,8 +361,7 @@ func (cm *containerManagerImpl) NewPodContainerManager() PodContainerManager {
 		}
 	}
 	return &podContainerManagerNoop{
-		cgroupRoot:      cm.cgroupRoot,
-		rootlessSystemd: cm.NodeConfig.Rootless && cm.NodeConfig.CgroupDriver == "systemd",
+		cgroupRoot: cm.cgroupRoot,
 	}
 }
 
@@ -389,7 +384,6 @@ func createManager(containerName string) (cgroups.Manager, error) {
 					Major:       configs.Wildcard,
 				},
 			},
-			SkipDevices: true,
 		},
 	}
 
@@ -442,11 +436,7 @@ func setupKernelTunables(option KernelTunableBehavior) error {
 			klog.V(2).Infof("Updating kernel flag: %v, expected value: %v, actual value: %v", flag, expectedValue, val)
 			err = sysctl.SetSysctl(flag, expectedValue)
 			if err != nil {
-				if libcontainersystem.RunningInUserNS() {
-					klog.Warningf("Updating kernel flag failed: %v: %v (running in UserNS)", flag, err)
-				} else {
-					errList = append(errList, err)
-				}
+				errList = append(errList, err)
 			}
 		}
 	}
@@ -509,9 +499,6 @@ func (cm *containerManagerImpl) setupNode(activePods ActivePodsFunc) error {
 		if cm.SystemCgroupsName == "/" {
 			return fmt.Errorf("system container cannot be root (\"/\")")
 		}
-		if cm.Rootless {
-			return fmt.Errorf("rootless does not support SystemCgroupsName")
-		}
 		cont, err := newSystemCgroups(cm.SystemCgroupsName)
 		if err != nil {
 			return err
@@ -523,9 +510,6 @@ func (cm *containerManagerImpl) setupNode(activePods ActivePodsFunc) error {
 	}
 
 	if cm.KubeletCgroupsName != "" {
-		if cm.Rootless {
-			return fmt.Errorf("rootless does not support KubeletCgroupsName")
-		}
 		cont, err := newSystemCgroups(cm.KubeletCgroupsName)
 		if err != nil {
 			return err

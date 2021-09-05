@@ -24,7 +24,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/apiserver/pkg/server/dynamiccertificates"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -53,8 +52,6 @@ type APIServiceRegistrationController struct {
 
 	queue workqueue.RateLimitingInterface
 }
-
-var _ dynamiccertificates.Listener = &APIServiceRegistrationController{}
 
 // NewAPIServiceRegistrationController returns a new APIServiceRegistrationController.
 func NewAPIServiceRegistrationController(apiServiceInformer informers.APIServiceInformer, apiHandlerManager APIHandlerManager) *APIServiceRegistrationController {
@@ -155,7 +152,7 @@ func (c *APIServiceRegistrationController) processNextWorkItem() bool {
 	return true
 }
 
-func (c *APIServiceRegistrationController) enqueueInternal(obj *v1.APIService) {
+func (c *APIServiceRegistrationController) enqueue(obj *v1.APIService) {
 	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 	if err != nil {
 		klog.Errorf("Couldn't get key for object %#v: %v", obj, err)
@@ -168,13 +165,13 @@ func (c *APIServiceRegistrationController) enqueueInternal(obj *v1.APIService) {
 func (c *APIServiceRegistrationController) addAPIService(obj interface{}) {
 	castObj := obj.(*v1.APIService)
 	klog.V(4).Infof("Adding %s", castObj.Name)
-	c.enqueueInternal(castObj)
+	c.enqueue(castObj)
 }
 
 func (c *APIServiceRegistrationController) updateAPIService(obj, _ interface{}) {
 	castObj := obj.(*v1.APIService)
 	klog.V(4).Infof("Updating %s", castObj.Name)
-	c.enqueueInternal(castObj)
+	c.enqueue(castObj)
 }
 
 func (c *APIServiceRegistrationController) deleteAPIService(obj interface{}) {
@@ -192,18 +189,5 @@ func (c *APIServiceRegistrationController) deleteAPIService(obj interface{}) {
 		}
 	}
 	klog.V(4).Infof("Deleting %q", castObj.Name)
-	c.enqueueInternal(castObj)
-}
-
-// Enqueue queues all apiservices to be rehandled.
-// This method is used by the controller to notify when the proxy cert content changes.
-func (c *APIServiceRegistrationController) Enqueue() {
-	apiServices, err := c.apiServiceLister.List(labels.Everything())
-	if err != nil {
-		utilruntime.HandleError(err)
-		return
-	}
-	for _, apiService := range apiServices {
-		c.addAPIService(apiService)
-	}
+	c.enqueue(castObj)
 }

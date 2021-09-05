@@ -260,37 +260,35 @@ func checkUDPPorts(udpOnlyPorts sets.Int, ports []string, obj metav1.Object) err
 // checkUDPPortInService returns an error if remote port in Service is a UDP port
 // TODO: remove this check after #47862 is solved
 func checkUDPPortInService(ports []string, svc *corev1.Service) error {
-	udpPorts := sets.NewInt()
-	tcpPorts := sets.NewInt()
+	udpOnlyPorts := sets.NewInt()
 	for _, port := range svc.Spec.Ports {
 		portNum := int(port.Port)
 		switch port.Protocol {
 		case corev1.ProtocolUDP:
-			udpPorts.Insert(portNum)
+			udpOnlyPorts.Insert(portNum)
 		case corev1.ProtocolTCP:
-			tcpPorts.Insert(portNum)
+			udpOnlyPorts.Delete(portNum)
 		}
 	}
-	return checkUDPPorts(udpPorts.Difference(tcpPorts), ports, svc)
+	return checkUDPPorts(udpOnlyPorts, ports, svc)
 }
 
 // checkUDPPortInPod returns an error if remote port in Pod is a UDP port
 // TODO: remove this check after #47862 is solved
 func checkUDPPortInPod(ports []string, pod *corev1.Pod) error {
-	udpPorts := sets.NewInt()
-	tcpPorts := sets.NewInt()
+	udpOnlyPorts := sets.NewInt()
 	for _, ct := range pod.Spec.Containers {
 		for _, ctPort := range ct.Ports {
 			portNum := int(ctPort.ContainerPort)
 			switch ctPort.Protocol {
 			case corev1.ProtocolUDP:
-				udpPorts.Insert(portNum)
+				udpOnlyPorts.Insert(portNum)
 			case corev1.ProtocolTCP:
-				tcpPorts.Insert(portNum)
+				udpOnlyPorts.Delete(portNum)
 			}
 		}
 	}
-	return checkUDPPorts(udpPorts.Difference(tcpPorts), ports, pod)
+	return checkUDPPorts(udpOnlyPorts, ports, pod)
 }
 
 // Complete completes all the required options for port-forward cmd.

@@ -163,8 +163,6 @@ type Config struct {
 	Serializer runtime.NegotiatedSerializer
 	// OpenAPIConfig will be used in generating OpenAPI spec. This is nil by default. Use DefaultOpenAPIConfig for "working" defaults.
 	OpenAPIConfig *openapicommon.Config
-	// SkipOpenAPIInstallation avoids installing the OpenAPI handler if set to true.
-	SkipOpenAPIInstallation bool
 
 	// RESTOptionsGetter is used to construct RESTStorage types via the generic registry.
 	RESTOptionsGetter genericregistry.RESTOptionsGetter
@@ -561,8 +559,7 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 
 		listedPathProvider: apiServerHandler,
 
-		openAPIConfig:           c.OpenAPIConfig,
-		skipOpenAPIInstallation: c.SkipOpenAPIInstallation,
+		openAPIConfig: c.OpenAPIConfig,
 
 		postStartHooks:         map[string]postStartHookEntry{},
 		preShutdownHooks:       map[string]preShutdownHookEntry{},
@@ -610,18 +607,11 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 	}
 
 	genericApiServerHookName := "generic-apiserver-start-informers"
-	if c.SharedInformerFactory != nil {
-		if !s.isPostStartHookRegistered(genericApiServerHookName) {
-			err := s.AddPostStartHook(genericApiServerHookName, func(context PostStartHookContext) error {
-				c.SharedInformerFactory.Start(context.StopCh)
-				return nil
-			})
-			if err != nil {
-				return nil, err
-			}
-		}
-		// TODO: Once we get rid of /healthz consider changing this to post-start-hook.
-		err := s.addReadyzChecks(healthz.NewInformerSyncHealthz(c.SharedInformerFactory))
+	if c.SharedInformerFactory != nil && !s.isPostStartHookRegistered(genericApiServerHookName) {
+		err := s.AddPostStartHook(genericApiServerHookName, func(context PostStartHookContext) error {
+			c.SharedInformerFactory.Start(context.StopCh)
+			return nil
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -631,7 +621,6 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 	if s.isPostStartHookRegistered(priorityAndFairnessConfigConsumerHookName) {
 	} else if c.FlowControl != nil {
 		err := s.AddPostStartHook(priorityAndFairnessConfigConsumerHookName, func(context PostStartHookContext) error {
-			go c.FlowControl.MaintainObservations(context.StopCh)
 			go c.FlowControl.Run(context.StopCh)
 			return nil
 		})
@@ -641,31 +630,6 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 		// TODO(yue9944882): plumb pre-shutdown-hook for request-management system?
 	} else {
 		klog.V(3).Infof("Not requested to run hook %s", priorityAndFairnessConfigConsumerHookName)
-	}
-
-	// Add PostStartHooks for maintaining the watermarks for the Priority-and-Fairness and the Max-in-Flight filters.
-	if c.FlowControl != nil {
-		const priorityAndFairnessFilterHookName = "priority-and-fairness-filter"
-		if !s.isPostStartHookRegistered(priorityAndFairnessFilterHookName) {
-			err := s.AddPostStartHook(priorityAndFairnessFilterHookName, func(context PostStartHookContext) error {
-				genericfilters.StartPriorityAndFairnessWatermarkMaintenance(context.StopCh)
-				return nil
-			})
-			if err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		const maxInFlightFilterHookName = "max-in-flight-filter"
-		if !s.isPostStartHookRegistered(maxInFlightFilterHookName) {
-			err := s.AddPostStartHook(maxInFlightFilterHookName, func(context PostStartHookContext) error {
-				genericfilters.StartMaxInFlightWatermarkMaintenance(context.StopCh)
-				return nil
-			})
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
 
 	for _, delegateCheck := range delegationTarget.HealthzChecks() {

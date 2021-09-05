@@ -62,6 +62,10 @@ var (
 		kubectl scale --replicas=3 statefulset/web`))
 )
 
+const (
+	timeout = 5 * time.Minute
+)
+
 type ScaleOptions struct {
 	FilenameOptions resource.FilenameOptions
 	RecordFlags     *genericclioptions.RecordFlags
@@ -230,7 +234,7 @@ func (o *ScaleOptions) RunScale() error {
 
 	var waitForReplicas *scale.RetryParams
 	if o.Timeout != 0 && o.dryRunStrategy == cmdutil.DryRunNone {
-		waitForReplicas = scale.NewRetryParams(1*time.Second, o.Timeout)
+		waitForReplicas = scale.NewRetryParams(1*time.Second, timeout)
 	}
 
 	counter := 0

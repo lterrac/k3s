@@ -305,6 +305,9 @@ func autoConvert_v1beta1_KubeSchedulerConfiguration_To_config_KubeSchedulerConfi
 	if err := v1alpha1.Convert_v1alpha1_DebuggingConfiguration_To_config_DebuggingConfiguration(&in.DebuggingConfiguration, &out.DebuggingConfiguration, s); err != nil {
 		return err
 	}
+	if err := metav1.Convert_Pointer_bool_To_bool(&in.DisablePreemption, &out.DisablePreemption, s); err != nil {
+		return err
+	}
 	if err := metav1.Convert_Pointer_int32_To_int32(&in.PercentageOfNodesToScore, &out.PercentageOfNodesToScore, s); err != nil {
 		return err
 	}
@@ -344,6 +347,9 @@ func autoConvert_config_KubeSchedulerConfiguration_To_v1beta1_KubeSchedulerConfi
 		return err
 	}
 	if err := v1alpha1.Convert_config_DebuggingConfiguration_To_v1alpha1_DebuggingConfiguration(&in.DebuggingConfiguration, &out.DebuggingConfiguration, s); err != nil {
+		return err
+	}
+	if err := metav1.Convert_bool_To_Pointer_bool(&in.DisablePreemption, &out.DisablePreemption, s); err != nil {
 		return err
 	}
 	if err := metav1.Convert_int32_To_Pointer_int32(&in.PercentageOfNodesToScore, &out.PercentageOfNodesToScore, s); err != nil {
@@ -462,7 +468,6 @@ func Convert_config_NodeLabelArgs_To_v1beta1_NodeLabelArgs(in *config.NodeLabelA
 
 func autoConvert_v1beta1_NodeResourcesFitArgs_To_config_NodeResourcesFitArgs(in *v1beta1.NodeResourcesFitArgs, out *config.NodeResourcesFitArgs, s conversion.Scope) error {
 	out.IgnoredResources = *(*[]string)(unsafe.Pointer(&in.IgnoredResources))
-	out.IgnoredResourceGroups = *(*[]string)(unsafe.Pointer(&in.IgnoredResourceGroups))
 	return nil
 }
 
@@ -473,7 +478,6 @@ func Convert_v1beta1_NodeResourcesFitArgs_To_config_NodeResourcesFitArgs(in *v1b
 
 func autoConvert_config_NodeResourcesFitArgs_To_v1beta1_NodeResourcesFitArgs(in *config.NodeResourcesFitArgs, out *v1beta1.NodeResourcesFitArgs, s conversion.Scope) error {
 	out.IgnoredResources = *(*[]string)(unsafe.Pointer(&in.IgnoredResources))
-	out.IgnoredResourceGroups = *(*[]string)(unsafe.Pointer(&in.IgnoredResourceGroups))
 	return nil
 }
 

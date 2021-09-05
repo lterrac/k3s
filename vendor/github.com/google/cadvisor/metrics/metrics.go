@@ -18,7 +18,6 @@ import (
 	"time"
 
 	info "github.com/google/cadvisor/info/v1"
-	v2 "github.com/google/cadvisor/info/v2"
 )
 
 // metricValue describes a single metric value for a given set of label values
@@ -33,8 +32,9 @@ type metricValues []metricValue
 
 // infoProvider will usually be manager.Manager, but can be swapped out for testing.
 type infoProvider interface {
-	// GetRequestedContainersInfo gets info for all requested containers based on the request options.
-	GetRequestedContainersInfo(containerName string, options v2.RequestOptions) (map[string]*info.ContainerInfo, error)
+	// SubcontainersInfo provides information about all subcontainers of the
+	// specified container including itself.
+	SubcontainersInfo(containerName string, query *info.ContainerInfoRequest) ([]*info.ContainerInfo, error)
 	// GetVersionInfo provides information about the version.
 	GetVersionInfo() (*info.VersionInfo, error)
 	// GetMachineInfo provides information about the machine.

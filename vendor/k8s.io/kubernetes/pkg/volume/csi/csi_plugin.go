@@ -42,7 +42,6 @@ import (
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/csi/nodeinfomanager"
-	volumetypes "k8s.io/kubernetes/pkg/volume/util/types"
 )
 
 const (
@@ -233,25 +232,21 @@ func (p *csiPlugin) Init(host volume.VolumeHost) error {
 	}
 
 	// Initializing the label management channels
-	localNim := nodeinfomanager.NewNodeInfoManager(host.GetNodeName(), host, migratedPlugins)
+	nim = nodeinfomanager.NewNodeInfoManager(host.GetNodeName(), host, migratedPlugins)
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.CSINodeInfo) &&
 		utilfeature.DefaultFeatureGate.Enabled(features.CSIMigration) {
 		// This function prevents Kubelet from posting Ready status until CSINode
 		// is both installed and initialized
-		if err := initializeCSINode(host, localNim); err != nil {
-			return errors.New(log("failed to initialize CSINodeInfo: %v", err))
+		if err := initializeCSINode(host); err != nil {
+			return errors.New(log("failed to initialize CSINode: %v", err))
 		}
-	}
-
-	if _, ok := host.(volume.KubeletVolumeHost); ok {
-		nim = localNim
 	}
 
 	return nil
 }
 
-func initializeCSINode(host volume.VolumeHost, nim nodeinfomanager.Interface) error {
+func initializeCSINode(host volume.VolumeHost) error {
 	kvh, ok := host.(volume.KubeletVolumeHost)
 	if !ok {
 		klog.V(4).Info("Cast from VolumeHost to KubeletVolumeHost failed. Skipping CSINode initialization, not running on kubelet")
@@ -385,11 +380,6 @@ func (p *csiPlugin) NewMounter(
 		return nil, err
 	}
 
-	fsGroupPolicy, err := p.getFSGroupPolicy(driverName)
-	if err != nil {
-		return nil, err
-	}
-
 	k8s := p.host.GetKubeClient()
 	if k8s == nil {
 		return nil, errors.New(log("failed to get a kubernetes client"))
@@ -408,7 +398,6 @@ func (p *csiPlugin) NewMounter(
 		podUID:              pod.UID,
 		driverName:          csiDriverName(driverName),
 		volumeLifecycleMode: volumeLifecycleMode,
-		fsGroupPolicy:       fsGroupPolicy,
 		volumeID:            volumeHandle,
 		specVolumeID:        spec.Name(),
 		readOnly:            readOnly,
@@ -440,23 +429,11 @@ func (p *csiPlugin) NewMounter(
 	attachID := getAttachmentName(volumeHandle, driverName, node)
 	volData[volDataKey.attachmentID] = attachID
 
-	err = saveVolumeData(dataDir, volDataFileName, volData)
-	defer func() {
-		// Only if there was an error and volume operation was considered
-		// finished, we should remove the directory.
-		if err != nil && volumetypes.IsOperationFinishedError(err) {
-			// attempt to cleanup volume mount dir.
-			if err = removeMountDir(p, dir); err != nil {
-				klog.Error(log("attacher.MountDevice failed to remove mount dir after error [%s]: %v", dir, err))
-			}
+	if err := saveVolumeData(dataDir, volDataFileName, volData); err != nil {
+		if removeErr := os.RemoveAll(dataDir); removeErr != nil {
+			klog.Error(log("failed to remove dir after error [%s]: %v", dataDir, removeErr))
 		}
-	}()
-
-	if err != nil {
-		errorMsg := log("csi.NewMounter failed to save volume info data: %v", err)
-		klog.Error(errorMsg)
-
-		return nil, errors.New(errorMsg)
+		return nil, errors.New(log("failed to save volume info data: %v", err))
 	}
 
 	klog.V(4).Info(log("mounter created successfully"))
@@ -697,21 +674,11 @@ func (p *csiPlugin) NewBlockVolumeMapper(spec *volume.Spec, podRef *api.Pod, opt
 		volDataKey.attachmentID: attachID,
 	}
 
-	err = saveVolumeData(dataDir, volDataFileName, volData)
-	defer func() {
-		// Only if there was an error and volume operation was considered
-		// finished, we should remove the directory.
-		if err != nil && volumetypes.IsOperationFinishedError(err) {
-			// attempt to cleanup volume mount dir.
-			if err = removeMountDir(p, dataDir); err != nil {
-				klog.Error(log("attacher.MountDevice failed to remove mount dir after error [%s]: %v", dataDir, err))
-			}
+	if err := saveVolumeData(dataDir, volDataFileName, volData); err != nil {
+		if removeErr := os.RemoveAll(dataDir); removeErr != nil {
+			klog.Error(log("failed to remove dir after error [%s]: %v", dataDir, removeErr))
 		}
-	}()
-	if err != nil {
-		errorMsg := log("csi.NewBlockVolumeMapper failed to save volume info data: %v", err)
-		klog.Error(errorMsg)
-		return nil, errors.New(errorMsg)
+		return nil, errors.New(log("failed to save volume info data: %v", err))
 	}
 
 	return mapper, nil
@@ -877,46 +844,6 @@ func (p *csiPlugin) getVolumeLifecycleMode(spec *volume.Spec) (storage.VolumeLif
 		return storage.VolumeLifecycleEphemeral, nil
 	}
 	return storage.VolumeLifecyclePersistent, nil
-}
-
-// getFSGroupPolicy returns if the CSI driver supports a volume in the given mode.
-// An error indicates that it isn't supported and explains why.
-func (p *csiPlugin) getFSGroupPolicy(driver string) (storage.FSGroupPolicy, error) {
-	if !utilfeature.DefaultFeatureGate.Enabled(features.CSIVolumeFSGroupPolicy) {
-		// feature is disabled, default to ReadWriteOnceWithFSTypeFSGroupPolicy
-		return storage.ReadWriteOnceWithFSTypeFSGroupPolicy, nil
-	}
-
-	// Retrieve CSIDriver. It's not an error if that isn't
-	// possible (we don't have the lister if CSIDriverRegistry is
-	// disabled) or the driver isn't found (CSIDriver is
-	// optional)
-	var csiDriver *storage.CSIDriver
-	if p.csiDriverLister != nil {
-		kletHost, ok := p.host.(volume.KubeletVolumeHost)
-		if ok {
-			if err := kletHost.WaitForCacheSync(); err != nil {
-				return storage.ReadWriteOnceWithFSTypeFSGroupPolicy, err
-			}
-		}
-
-		c, err := p.csiDriverLister.Get(driver)
-		if err != nil && !apierrors.IsNotFound(err) {
-			// Some internal error.
-			return storage.ReadWriteOnceWithFSTypeFSGroupPolicy, err
-		}
-		csiDriver = c
-	}
-
-	// If the csiDriver isn't defined, return the default behavior
-	if csiDriver == nil {
-		return storage.ReadWriteOnceWithFSTypeFSGroupPolicy, nil
-	}
-	// If the csiDriver exists but the fsGroupPolicy isn't defined, return an error
-	if csiDriver.Spec.FSGroupPolicy == nil || *csiDriver.Spec.FSGroupPolicy == "" {
-		return storage.ReadWriteOnceWithFSTypeFSGroupPolicy, errors.New(log("expected valid fsGroupPolicy, received nil value or empty string"))
-	}
-	return *csiDriver.Spec.FSGroupPolicy, nil
 }
 
 func (p *csiPlugin) getPublishContext(client clientset.Interface, handle, driver, nodeName string) (map[string]string, error) {

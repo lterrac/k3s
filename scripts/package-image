@@ -6,7 +6,7 @@ cd $(dirname $0)/..
 . ./scripts/version.sh
 
 TAG=${TAG:-${VERSION_TAG}${SUFFIX}}
-REPO=${REPO:-rancher}
+REPO=${REPO:-systemautoscaler}
 IMAGE_NAME=${IMAGE_NAME:-k3s}
 
 IMAGE=${REPO}/${IMAGE_NAME}:${TAG}

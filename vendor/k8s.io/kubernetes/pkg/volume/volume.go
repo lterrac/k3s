@@ -174,19 +174,14 @@ type CustomBlockVolumeMapper interface {
 	// For most in-tree plugins, attacher.Attach() and attacher.WaitForAttach()
 	// will do necessary works.
 	// This may be called more than once, so implementations must be idempotent.
-	// SetUpDevice returns stagingPath if device setup was successful
-	SetUpDevice() (stagingPath string, err error)
+	SetUpDevice() error
 
 	// MapPodDevice maps the block device to a path and return the path.
 	// Unique device path across kubelet node reboot is required to avoid
 	// unexpected block volume destruction.
 	// If empty string is returned, the path retuned by attacher.Attach() and
 	// attacher.WaitForAttach() will be used.
-	MapPodDevice() (publishPath string, err error)
-
-	// GetStagingPath returns path that was used for staging the volume
-	// it is mainly used by CSI plugins
-	GetStagingPath() string
+	MapPodDevice() (string, error)
 }
 
 // BlockVolumeUnmapper interface is an unmapper interface for block volume.

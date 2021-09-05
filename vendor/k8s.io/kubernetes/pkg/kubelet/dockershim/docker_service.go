@@ -24,7 +24,6 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"time"
 
@@ -256,28 +255,24 @@ func NewDockerService(config *ClientConfig, podSandboxImage string, streamingCon
 	ds.network = network.NewPluginManager(plug)
 	klog.Infof("Docker cri networking managed by %v", plug.Name())
 
-	// skipping cgroup driver checks for Windows
-	if runtime.GOOS == "linux" {
-		// NOTE: cgroup driver is only detectable in docker 1.11+
-		cgroupDriver := defaultCgroupDriver
-		dockerInfo, err := ds.client.Info()
-		klog.Infof("Docker Info: %+v", dockerInfo)
-		if err != nil {
-			klog.Errorf("Failed to execute Info() call to the Docker client: %v", err)
-			klog.Warningf("Falling back to use the default driver: %q", cgroupDriver)
-		} else if len(dockerInfo.CgroupDriver) == 0 {
-			klog.Warningf("No cgroup driver is set in Docker")
-			klog.Warningf("Falling back to use the default driver: %q", cgroupDriver)
-		} else {
-			cgroupDriver = dockerInfo.CgroupDriver
-		}
-		if len(kubeCgroupDriver) != 0 && kubeCgroupDriver != cgroupDriver {
-			return nil, fmt.Errorf("misconfiguration: kubelet cgroup driver: %q is different from docker cgroup driver: %q", kubeCgroupDriver, cgroupDriver)
-		}
-		klog.Infof("Setting cgroupDriver to %s", cgroupDriver)
-		ds.cgroupDriver = cgroupDriver
+	// NOTE: cgroup driver is only detectable in docker 1.11+
+	cgroupDriver := defaultCgroupDriver
+	dockerInfo, err := ds.client.Info()
+	klog.Infof("Docker Info: %+v", dockerInfo)
+	if err != nil {
+		klog.Errorf("Failed to execute Info() call to the Docker client: %v", err)
+		klog.Warningf("Falling back to use the default driver: %q", cgroupDriver)
+	} else if len(dockerInfo.CgroupDriver) == 0 {
+		klog.Warningf("No cgroup driver is set in Docker")
+		klog.Warningf("Falling back to use the default driver: %q", cgroupDriver)
+	} else {
+		cgroupDriver = dockerInfo.CgroupDriver
 	}
-
+	if len(kubeCgroupDriver) != 0 && kubeCgroupDriver != cgroupDriver {
+		return nil, fmt.Errorf("misconfiguration: kubelet cgroup driver: %q is different from docker cgroup driver: %q", kubeCgroupDriver, cgroupDriver)
+	}
+	klog.Infof("Setting cgroupDriver to %s", cgroupDriver)
+	ds.cgroupDriver = cgroupDriver
 	ds.versionCache = cache.NewObjectCache(
 		func() (interface{}, error) {
 			return ds.getDockerVersion()
@@ -321,7 +316,6 @@ type dockerService struct {
 	// (see `applyPlatformSpecificDockerConfig` and `performPlatformSpecificContainerCleanup`
 	// methods for more info).
 	containerCleanupInfos map[string]*containerCleanupInfo
-	cleanupInfosLock      sync.RWMutex
 }
 
 // TODO: handle context.

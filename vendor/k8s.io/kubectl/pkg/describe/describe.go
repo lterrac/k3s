@@ -156,28 +156,6 @@ func (pw *prefixWriter) Flush() {
 	}
 }
 
-// nestedPrefixWriter implements PrefixWriter by increasing the level
-// before passing text on to some other writer.
-type nestedPrefixWriter struct {
-	PrefixWriter
-	indent int
-}
-
-var _ PrefixWriter = &prefixWriter{}
-
-// NewPrefixWriter creates a new PrefixWriter.
-func NewNestedPrefixWriter(out PrefixWriter, indent int) PrefixWriter {
-	return &nestedPrefixWriter{PrefixWriter: out, indent: indent}
-}
-
-func (npw *nestedPrefixWriter) Write(level int, format string, a ...interface{}) {
-	npw.PrefixWriter.Write(level+npw.indent, format, a...)
-}
-
-func (npw *nestedPrefixWriter) WriteLine(a ...interface{}) {
-	npw.PrefixWriter.Write(npw.indent, "%s", fmt.Sprintln(a...))
-}
-
 func describerMap(clientConfig *rest.Config) (map[schema.GroupKind]ResourceDescriber, error) {
 	c, err := clientset.NewForConfig(clientConfig)
 	if err != nil {
@@ -844,8 +822,6 @@ func describeVolumes(volumes []corev1.Volume, w PrefixWriter, space string) {
 			printGlusterfsVolumeSource(volume.VolumeSource.Glusterfs, w)
 		case volume.VolumeSource.PersistentVolumeClaim != nil:
 			printPersistentVolumeClaimVolumeSource(volume.VolumeSource.PersistentVolumeClaim, w)
-		case volume.VolumeSource.Ephemeral != nil:
-			printEphemeralVolumeSource(volume.VolumeSource.Ephemeral, w)
 		case volume.VolumeSource.RBD != nil:
 			printRBDVolumeSource(volume.VolumeSource.RBD, w)
 		case volume.VolumeSource.Quobyte != nil:
@@ -1059,18 +1035,6 @@ func printPersistentVolumeClaimVolumeSource(claim *corev1.PersistentVolumeClaimV
 		"    ClaimName:\t%v\n"+
 		"    ReadOnly:\t%v\n",
 		claim.ClaimName, claim.ReadOnly)
-}
-
-func printEphemeralVolumeSource(ephemeral *corev1.EphemeralVolumeSource, w PrefixWriter) {
-	w.Write(LEVEL_2, "Type:\tEphemeralVolume (an inline specification for a volume that gets created and deleted with the pod)\n")
-	if ephemeral.VolumeClaimTemplate != nil {
-		printPersistentVolumeClaim(NewNestedPrefixWriter(w, LEVEL_2),
-			&corev1.PersistentVolumeClaim{
-				ObjectMeta: ephemeral.VolumeClaimTemplate.ObjectMeta,
-				Spec:       ephemeral.VolumeClaimTemplate.Spec,
-			}, false /* not a full PVC */)
-	}
-	w.Write(LEVEL_2, "ReadOnly:\t%v\n", ephemeral.ReadOnly)
 }
 
 func printRBDVolumeSource(rbd *corev1.RBDVolumeSource, w PrefixWriter) {
@@ -1571,7 +1535,39 @@ func getPvcs(volumes []corev1.Volume) []corev1.Volume {
 func describePersistentVolumeClaim(pvc *corev1.PersistentVolumeClaim, events *corev1.EventList, mountPods []corev1.Pod) (string, error) {
 	return tabbedString(func(out io.Writer) error {
 		w := NewPrefixWriter(out)
-		printPersistentVolumeClaim(w, pvc, true)
+		w.Write(LEVEL_0, "Name:\t%s\n", pvc.Name)
+		w.Write(LEVEL_0, "Namespace:\t%s\n", pvc.Namespace)
+		w.Write(LEVEL_0, "StorageClass:\t%s\n", storageutil.GetPersistentVolumeClaimClass(pvc))
+		if pvc.ObjectMeta.DeletionTimestamp != nil {
+			w.Write(LEVEL_0, "Status:\tTerminating (lasts %s)\n", translateTimestampSince(*pvc.ObjectMeta.DeletionTimestamp))
+		} else {
+			w.Write(LEVEL_0, "Status:\t%v\n", pvc.Status.Phase)
+		}
+		w.Write(LEVEL_0, "Volume:\t%s\n", pvc.Spec.VolumeName)
+		printLabelsMultiline(w, "Labels", pvc.Labels)
+		printAnnotationsMultiline(w, "Annotations", pvc.Annotations)
+		w.Write(LEVEL_0, "Finalizers:\t%v\n", pvc.ObjectMeta.Finalizers)
+		storage := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+		capacity := ""
+		accessModes := ""
+		if pvc.Spec.VolumeName != "" {
+			accessModes = storageutil.GetAccessModesAsString(pvc.Status.AccessModes)
+			storage = pvc.Status.Capacity[corev1.ResourceStorage]
+			capacity = storage.String()
+		}
+		w.Write(LEVEL_0, "Capacity:\t%s\n", capacity)
+		w.Write(LEVEL_0, "Access Modes:\t%s\n", accessModes)
+		if pvc.Spec.VolumeMode != nil {
+			w.Write(LEVEL_0, "VolumeMode:\t%v\n", *pvc.Spec.VolumeMode)
+		}
+		if pvc.Spec.DataSource != nil {
+			w.Write(LEVEL_0, "DataSource:\n")
+			if pvc.Spec.DataSource.APIGroup != nil {
+				w.Write(LEVEL_1, "APIGroup:\t%v\n", *pvc.Spec.DataSource.APIGroup)
+			}
+			w.Write(LEVEL_1, "Kind:\t%v\n", pvc.Spec.DataSource.Kind)
+			w.Write(LEVEL_1, "Name:\t%v\n", pvc.Spec.DataSource.Name)
+		}
 		printPodsMultiline(w, "Mounted By", mountPods)
 
 		if len(pvc.Status.Conditions) > 0 {
@@ -1594,50 +1590,6 @@ func describePersistentVolumeClaim(pvc *corev1.PersistentVolumeClaim, events *co
 
 		return nil
 	})
-}
-
-// printPersistentVolumeClaim is used for both PVCs and PersistentVolumeClaimTemplate. For the latter,
-// we need to skip some fields which have no meaning.
-func printPersistentVolumeClaim(w PrefixWriter, pvc *corev1.PersistentVolumeClaim, isFullPVC bool) {
-	if isFullPVC {
-		w.Write(LEVEL_0, "Name:\t%s\n", pvc.Name)
-		w.Write(LEVEL_0, "Namespace:\t%s\n", pvc.Namespace)
-	}
-	w.Write(LEVEL_0, "StorageClass:\t%s\n", storageutil.GetPersistentVolumeClaimClass(pvc))
-	if isFullPVC {
-		if pvc.ObjectMeta.DeletionTimestamp != nil {
-			w.Write(LEVEL_0, "Status:\tTerminating (lasts %s)\n", translateTimestampSince(*pvc.ObjectMeta.DeletionTimestamp))
-		} else {
-			w.Write(LEVEL_0, "Status:\t%v\n", pvc.Status.Phase)
-		}
-	}
-	w.Write(LEVEL_0, "Volume:\t%s\n", pvc.Spec.VolumeName)
-	printLabelsMultiline(w, "Labels", pvc.Labels)
-	printAnnotationsMultiline(w, "Annotations", pvc.Annotations)
-	if isFullPVC {
-		w.Write(LEVEL_0, "Finalizers:\t%v\n", pvc.ObjectMeta.Finalizers)
-	}
-	storage := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
-	capacity := ""
-	accessModes := ""
-	if pvc.Spec.VolumeName != "" {
-		accessModes = storageutil.GetAccessModesAsString(pvc.Status.AccessModes)
-		storage = pvc.Status.Capacity[corev1.ResourceStorage]
-		capacity = storage.String()
-	}
-	w.Write(LEVEL_0, "Capacity:\t%s\n", capacity)
-	w.Write(LEVEL_0, "Access Modes:\t%s\n", accessModes)
-	if pvc.Spec.VolumeMode != nil {
-		w.Write(LEVEL_0, "VolumeMode:\t%v\n", *pvc.Spec.VolumeMode)
-	}
-	if pvc.Spec.DataSource != nil {
-		w.Write(LEVEL_0, "DataSource:\n")
-		if pvc.Spec.DataSource.APIGroup != nil {
-			w.Write(LEVEL_1, "APIGroup:\t%v\n", *pvc.Spec.DataSource.APIGroup)
-		}
-		w.Write(LEVEL_1, "Kind:\t%v\n", pvc.Spec.DataSource.Kind)
-		w.Write(LEVEL_1, "Name:\t%v\n", pvc.Spec.DataSource.Name)
-	}
 }
 
 func describeContainers(label string, containers []corev1.Container, containerStatuses []corev1.ContainerStatus,
@@ -1751,6 +1703,13 @@ func describeContainerResource(container corev1.Container, w PrefixWriter) {
 	}
 	for _, name := range SortedResourceNames(resources.Requests) {
 		quantity := resources.Requests[name]
+		w.Write(LEVEL_3, "%s:\t%s\n", name, quantity.String())
+	}
+	if len(container.ResourcesAllocated) > 0 {
+		w.Write(LEVEL_2, "Allocations:\n")
+	}
+	for _, name := range SortedResourceNames(container.ResourcesAllocated) {
+		quantity := container.ResourcesAllocated[name]
 		w.Write(LEVEL_3, "%s:\t%s\n", name, quantity.String())
 	}
 }
@@ -2465,15 +2424,11 @@ func (i *IngressDescriber) describeBackendV1(ns string, backend *networkingv1.In
 			}
 		}
 		ep := formatEndpoints(endpoints, sets.NewString(spName))
-		return fmt.Sprintf("%s (%s)", sb, ep)
+		return fmt.Sprintf("%s\t %s)", sb, ep)
 	}
 	if backend.Resource != nil {
 		ic := backend.Resource
-		apiGroup := "<none>"
-		if ic.APIGroup != nil {
-			apiGroup = fmt.Sprintf("%v", *ic.APIGroup)
-		}
-		return fmt.Sprintf("APIGroup: %v, Kind: %v, Name: %v", apiGroup, ic.Kind, ic.Name)
+		return fmt.Sprintf("APIGroup: %v, Kind: %v, Name: %v", *ic.APIGroup, ic.Kind, ic.Name)
 	}
 	return ""
 }
@@ -2522,7 +2477,7 @@ func (i *IngressDescriber) describeIngressV1(ing *networkingv1.Ingress, events *
 			}
 		}
 		if count == 0 {
-			w.Write(LEVEL_1, "%s\t%s\t%s\n", "*", "*", i.describeBackendV1(ns, def))
+			w.Write(LEVEL_1, "\t%s %s\n", "*", "*", i.describeBackendV1(ns, def))
 		}
 		printAnnotationsMultiline(w, "Annotations", ing.Annotations)
 
@@ -3753,8 +3708,8 @@ func describeHorizontalPodAutoscalerV1(hpa *autoscalingv1.HorizontalPodAutoscale
 
 func describeNodeResource(nodeNonTerminatedPodsList *corev1.PodList, node *corev1.Node, w PrefixWriter) {
 	w.Write(LEVEL_0, "Non-terminated Pods:\t(%d in total)\n", len(nodeNonTerminatedPodsList.Items))
-	w.Write(LEVEL_1, "Namespace\tName\t\tCPU Requests\tCPU Limits\tMemory Requests\tMemory Limits\tAGE\n")
-	w.Write(LEVEL_1, "---------\t----\t\t------------\t----------\t---------------\t-------------\t---\n")
+	w.Write(LEVEL_1, "Namespace\tName\t\tCPU Requests\tCPU Limits\tCPU Allocations\tMemory Requests\tMemory Limits\tMemory Allocations\tAGE\n")
+	w.Write(LEVEL_1, "---------\t----\t\t------------\t----------\t---------------\t---------------\t-------------\t------------------\t---\n")
 	allocatable := node.Status.Capacity
 	if len(node.Status.Allocatable) > 0 {
 		allocatable = node.Status.Allocatable
@@ -3767,15 +3722,20 @@ func describeNodeResource(nodeNonTerminatedPodsList *corev1.PodList, node *corev
 		fractionCpuLimit := float64(cpuLimit.MilliValue()) / float64(allocatable.Cpu().MilliValue()) * 100
 		fractionMemoryReq := float64(memoryReq.Value()) / float64(allocatable.Memory().Value()) * 100
 		fractionMemoryLimit := float64(memoryLimit.Value()) / float64(allocatable.Memory().Value()) * 100
-		w.Write(LEVEL_1, "%s\t%s\t\t%s (%d%%)\t%s (%d%%)\t%s (%d%%)\t%s (%d%%)\t%s\n", pod.Namespace, pod.Name,
-			cpuReq.String(), int64(fractionCpuReq), cpuLimit.String(), int64(fractionCpuLimit),
-			memoryReq.String(), int64(fractionMemoryReq), memoryLimit.String(), int64(fractionMemoryLimit), translateTimestampSince(pod.CreationTimestamp))
+		alloc := resourcehelper.PodResourceAllocations(&pod)
+		cpuAlloc, memoryAlloc := alloc[corev1.ResourceCPU], alloc[corev1.ResourceMemory]
+		fractionCpuAlloc := float64(cpuAlloc.MilliValue()) / float64(allocatable.Cpu().MilliValue()) * 100
+		fractionMemoryAlloc := float64(memoryAlloc.Value()) / float64(allocatable.Memory().Value()) * 100
+		w.Write(LEVEL_1, "%s\t%s\t\t%s (%d%%)\t%s (%d%%)\t%s (%d%%)\t%s (%d%%)\t%s (%d%%)\t%s (%d%%)\t%s\n", pod.Namespace, pod.Name,
+			cpuReq.String(), int64(fractionCpuReq), cpuLimit.String(), int64(fractionCpuLimit), cpuAlloc.String(), int64(fractionCpuAlloc),
+			memoryReq.String(), int64(fractionMemoryReq), memoryLimit.String(), int64(fractionMemoryLimit), memoryAlloc.String(), int64(fractionMemoryAlloc),
+			translateTimestampSince(pod.CreationTimestamp))
 	}
 
 	w.Write(LEVEL_0, "Allocated resources:\n  (Total limits may be over 100 percent, i.e., overcommitted.)\n")
-	w.Write(LEVEL_1, "Resource\tRequests\tLimits\n")
-	w.Write(LEVEL_1, "--------\t--------\t------\n")
-	reqs, limits := getPodsTotalRequestsAndLimits(nodeNonTerminatedPodsList)
+	w.Write(LEVEL_1, "Resource\tRequests\tLimits\tAllocations\n")
+	w.Write(LEVEL_1, "--------\t--------\t------\t-----------\n")
+	reqs, allocs, limits := getPodsTotalRequestsAllocsAndLimits(nodeNonTerminatedPodsList)
 	cpuReqs, cpuLimits, memoryReqs, memoryLimits, ephemeralstorageReqs, ephemeralstorageLimits :=
 		reqs[corev1.ResourceCPU], limits[corev1.ResourceCPU], reqs[corev1.ResourceMemory], limits[corev1.ResourceMemory], reqs[corev1.ResourceEphemeralStorage], limits[corev1.ResourceEphemeralStorage]
 	fractionCpuReqs := float64(0)
@@ -3796,13 +3756,28 @@ func describeNodeResource(nodeNonTerminatedPodsList *corev1.PodList, node *corev
 		fractionEphemeralStorageReqs = float64(ephemeralstorageReqs.Value()) / float64(allocatable.StorageEphemeral().Value()) * 100
 		fractionEphemeralStorageLimits = float64(ephemeralstorageLimits.Value()) / float64(allocatable.StorageEphemeral().Value()) * 100
 	}
-	w.Write(LEVEL_1, "%s\t%s (%d%%)\t%s (%d%%)\n",
-		corev1.ResourceCPU, cpuReqs.String(), int64(fractionCpuReqs), cpuLimits.String(), int64(fractionCpuLimits))
-	w.Write(LEVEL_1, "%s\t%s (%d%%)\t%s (%d%%)\n",
-		corev1.ResourceMemory, memoryReqs.String(), int64(fractionMemoryReqs), memoryLimits.String(), int64(fractionMemoryLimits))
-	w.Write(LEVEL_1, "%s\t%s (%d%%)\t%s (%d%%)\n",
-		corev1.ResourceEphemeralStorage, ephemeralstorageReqs.String(), int64(fractionEphemeralStorageReqs), ephemeralstorageLimits.String(), int64(fractionEphemeralStorageLimits))
-
+	cpuAllocs, memoryAllocs, ephemeralstorageAllocs := allocs[corev1.ResourceCPU], allocs[corev1.ResourceMemory], allocs[corev1.ResourceEphemeralStorage]
+	fractionCpuAllocs := float64(0)
+	if allocatable.Cpu().MilliValue() != 0 {
+		fractionCpuAllocs = float64(cpuAllocs.MilliValue()) / float64(allocatable.Cpu().MilliValue()) * 100
+	}
+	fractionMemoryAllocs := float64(0)
+	if allocatable.Memory().Value() != 0 {
+		fractionMemoryAllocs = float64(memoryAllocs.Value()) / float64(allocatable.Memory().Value()) * 100
+	}
+	fractionEphemeralStorageAllocs := float64(0)
+	if allocatable.StorageEphemeral().Value() != 0 {
+		fractionEphemeralStorageAllocs = float64(ephemeralstorageAllocs.Value()) / float64(allocatable.StorageEphemeral().Value()) * 100
+	}
+	w.Write(LEVEL_1, "%s\t%s (%d%%)\t%s (%d%%)\t%s (%d%%)\n",
+		corev1.ResourceCPU, cpuReqs.String(), int64(fractionCpuReqs),
+		cpuLimits.String(), int64(fractionCpuLimits), cpuAllocs.String(), int64(fractionCpuAllocs))
+	w.Write(LEVEL_1, "%s\t%s (%d%%)\t%s (%d%%)\t%s (%d%%)\n",
+		corev1.ResourceMemory, memoryReqs.String(), int64(fractionMemoryReqs),
+		memoryLimits.String(), int64(fractionMemoryLimits), memoryAllocs.String(), int64(fractionMemoryAllocs))
+	w.Write(LEVEL_1, "%s\t%s (%d%%)\t%s (%d%%)\t%s (%d%%)\n",
+		corev1.ResourceEphemeralStorage, ephemeralstorageReqs.String(), int64(fractionEphemeralStorageReqs),
+		ephemeralstorageLimits.String(), int64(fractionEphemeralStorageLimits), ephemeralstorageAllocs.String(), int64(fractionEphemeralStorageAllocs))
 	extResources := make([]string, 0, len(allocatable))
 	hugePageResources := make([]string, 0, len(allocatable))
 	for resource := range allocatable {
@@ -3834,8 +3809,9 @@ func describeNodeResource(nodeNonTerminatedPodsList *corev1.PodList, node *corev
 	}
 }
 
-func getPodsTotalRequestsAndLimits(podList *corev1.PodList) (reqs map[corev1.ResourceName]resource.Quantity, limits map[corev1.ResourceName]resource.Quantity) {
+func getPodsTotalRequestsAllocsAndLimits(podList *corev1.PodList) (reqs, allocs, limits map[corev1.ResourceName]resource.Quantity) {
 	reqs, limits = map[corev1.ResourceName]resource.Quantity{}, map[corev1.ResourceName]resource.Quantity{}
+	allocs = map[corev1.ResourceName]resource.Quantity{}
 	for _, pod := range podList.Items {
 		podReqs, podLimits := resourcehelper.PodRequestsAndLimits(&pod)
 		for podReqName, podReqValue := range podReqs {
@@ -3852,6 +3828,15 @@ func getPodsTotalRequestsAndLimits(podList *corev1.PodList) (reqs map[corev1.Res
 			} else {
 				value.Add(podLimitValue)
 				limits[podLimitName] = value
+			}
+		}
+		podAllocs := resourcehelper.PodResourceAllocations(&pod)
+		for podAllocName, podAllocValue := range podAllocs {
+			if value, ok := allocs[podAllocName]; !ok {
+				allocs[podAllocName] = podAllocValue.DeepCopy()
+			} else {
+				value.Add(podAllocValue)
+				allocs[podAllocName] = value
 			}
 		}
 	}
@@ -3877,15 +3862,11 @@ func DescribeEvents(el *corev1.EventList, w PrefixWriter) {
 				interval = translateMicroTimestampSince(e.EventTime)
 			}
 		}
-		source := e.Source.Component
-		if source == "" {
-			source = e.ReportingController
-		}
 		w.Write(LEVEL_1, "%v\t%v\t%s\t%v\t%v\n",
 			e.Type,
 			e.Reason,
 			interval,
-			source,
+			formatEventSource(e.Source),
 			strings.TrimSpace(e.Message),
 		)
 	}
@@ -5007,6 +4988,15 @@ func translateTimestampSince(timestamp metav1.Time) string {
 	}
 
 	return duration.HumanDuration(time.Since(timestamp.Time))
+}
+
+// formatEventSource formats EventSource as a comma separated string excluding Host when empty
+func formatEventSource(es corev1.EventSource) string {
+	EventSourceString := []string{es.Component}
+	if len(es.Host) > 0 {
+		EventSourceString = append(EventSourceString, es.Host)
+	}
+	return strings.Join(EventSourceString, ", ")
 }
 
 // Pass ports=nil for all ports.

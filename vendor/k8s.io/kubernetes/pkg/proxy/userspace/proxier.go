@@ -26,7 +26,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcontainersystem "github.com/opencontainers/runc/libcontainer/system"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -210,10 +209,7 @@ func NewCustomProxier(loadBalancer LoadBalancer, listenIP net.IP, iptables iptab
 
 	err = setRLimit(64 * 1000)
 	if err != nil {
-		if !libcontainersystem.RunningInUserNS() {
-			return nil, fmt.Errorf("failed to set open file handler limit to 64000: %v", err)
-		}
-		klog.Errorf("failed to set open file handler limit to 64000: %v (running in UserNS, ignoring the error)", err)
+		return nil, fmt.Errorf("failed to set open file handler limit: %v", err)
 	}
 
 	proxyPorts := newPortAllocator(pr)
@@ -493,11 +489,12 @@ func (proxier *Proxier) mergeService(service *v1.Service) sets.String {
 	if service == nil {
 		return nil
 	}
-	if utilproxy.ShouldSkipService(service) {
+	svcName := types.NamespacedName{Namespace: service.Namespace, Name: service.Name}
+	if utilproxy.ShouldSkipService(svcName, service) {
+		klog.V(3).Infof("Skipping service %s due to clusterIP = %q", svcName, service.Spec.ClusterIP)
 		return nil
 	}
 	existingPorts := sets.NewString()
-	svcName := types.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	for i := range service.Spec.Ports {
 		servicePort := &service.Spec.Ports[i]
 		serviceName := proxy.ServicePortName{NamespacedName: svcName, Port: servicePort.Name}
@@ -554,12 +551,12 @@ func (proxier *Proxier) unmergeService(service *v1.Service, existingPorts sets.S
 	if service == nil {
 		return
 	}
-
-	if utilproxy.ShouldSkipService(service) {
+	svcName := types.NamespacedName{Namespace: service.Namespace, Name: service.Name}
+	if utilproxy.ShouldSkipService(svcName, service) {
+		klog.V(3).Infof("Skipping service %s due to clusterIP = %q", svcName, service.Spec.ClusterIP)
 		return
 	}
 	staleUDPServices := sets.NewString()
-	svcName := types.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	for i := range service.Spec.Ports {
 		servicePort := &service.Spec.Ports[i]
 		if existingPorts.Has(servicePort.Name) {

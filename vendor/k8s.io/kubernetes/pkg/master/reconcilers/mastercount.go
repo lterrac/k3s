@@ -76,11 +76,6 @@ func (r *masterCountEndpointReconciler) ReconcileEndpoints(serviceName string, i
 			},
 		}
 	}
-
-	// Don't use the EndpointSliceMirroring controller to mirror this to
-	// EndpointSlices. This may change in the future.
-	skipMirrorChanged := setSkipMirrorTrue(e)
-
 	if errors.IsNotFound(err) {
 		// Simply create non-existing endpoints for the service.
 		e.Subsets = []corev1.EndpointSubset{{
@@ -104,8 +99,7 @@ func (r *masterCountEndpointReconciler) ReconcileEndpoints(serviceName string, i
 		_, err = r.epAdapter.Update(metav1.NamespaceDefault, e)
 		return err
 	}
-
-	if !skipMirrorChanged && ipCorrect && portsCorrect {
+	if ipCorrect && portsCorrect {
 		return r.epAdapter.EnsureEndpointSliceFromEndpoints(metav1.NamespaceDefault, e)
 	}
 	if !ipCorrect {

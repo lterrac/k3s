@@ -9,7 +9,6 @@ load(
 go_test(
     name = "go_default_test",
     srcs = [
-        "conditions_test.go",
         "meta_test.go",
         "multirestmapper_test.go",
         "priority_test.go",
@@ -28,7 +27,6 @@ go_test(
 go_library(
     name = "go_default_library",
     srcs = [
-        "conditions.go",
         "doc.go",
         "errors.go",
         "firsthit_restmapper.go",

@@ -15,11 +15,6 @@ go_library(
     ],
     importpath = "k8s.io/kubernetes/pkg/kubelet/dockershim/network/kubenet",
     deps = select({
-        "@io_bazel_rules_go//go/platform:aix": [
-            "//pkg/kubelet/apis/config:go_default_library",
-            "//pkg/kubelet/container:go_default_library",
-            "//pkg/kubelet/dockershim/network:go_default_library",
-        ],
         "@io_bazel_rules_go//go/platform:android": [
             "//pkg/features:go_default_library",
             "//pkg/kubelet/apis/config:go_default_library",
@@ -58,17 +53,7 @@ go_library(
             "//pkg/kubelet/container:go_default_library",
             "//pkg/kubelet/dockershim/network:go_default_library",
         ],
-        "@io_bazel_rules_go//go/platform:illumos": [
-            "//pkg/kubelet/apis/config:go_default_library",
-            "//pkg/kubelet/container:go_default_library",
-            "//pkg/kubelet/dockershim/network:go_default_library",
-        ],
         "@io_bazel_rules_go//go/platform:ios": [
-            "//pkg/kubelet/apis/config:go_default_library",
-            "//pkg/kubelet/container:go_default_library",
-            "//pkg/kubelet/dockershim/network:go_default_library",
-        ],
-        "@io_bazel_rules_go//go/platform:js": [
             "//pkg/kubelet/apis/config:go_default_library",
             "//pkg/kubelet/container:go_default_library",
             "//pkg/kubelet/dockershim/network:go_default_library",

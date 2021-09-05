@@ -22,6 +22,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ import (
 	libcontainercgroups "github.com/opencontainers/runc/libcontainer/cgroups"
 	cgroupfs "github.com/opencontainers/runc/libcontainer/cgroups/fs"
 	cgroupfs2 "github.com/opencontainers/runc/libcontainer/cgroups/fs2"
+	cgfscommon "github.com/opencontainers/runc/libcontainer/cgroups/fscommon"
 	cgroupsystemd "github.com/opencontainers/runc/libcontainer/cgroups/systemd"
 	libcontainerconfigs "github.com/opencontainers/runc/libcontainer/configs"
 	"k8s.io/klog/v2"
@@ -50,9 +52,6 @@ const (
 	libcontainerCgroupfs libcontainerCgroupManagerType = "cgroupfs"
 	// libcontainerSystemd means use libcontainer with systemd
 	libcontainerSystemd libcontainerCgroupManagerType = "systemd"
-	// noneDriver is the name of the "NOP" driver, which is used when
-	// cgroup is not accessible
-	noneDriver = "none"
 	// systemdSuffix is the cgroup name suffix for systemd
 	systemdSuffix string = ".slice"
 )
@@ -136,22 +135,18 @@ func IsSystemdStyleName(name string) bool {
 type libcontainerAdapter struct {
 	// cgroupManagerType defines how to interface with libcontainer
 	cgroupManagerType libcontainerCgroupManagerType
-	rootless          bool
 }
 
 // newLibcontainerAdapter returns a configured libcontainerAdapter for specified manager.
 // it does any initialization required by that manager to function.
-func newLibcontainerAdapter(cgroupManagerType libcontainerCgroupManagerType, rootless bool) *libcontainerAdapter {
-	return &libcontainerAdapter{cgroupManagerType: cgroupManagerType, rootless: rootless}
+func newLibcontainerAdapter(cgroupManagerType libcontainerCgroupManagerType) *libcontainerAdapter {
+	return &libcontainerAdapter{cgroupManagerType: cgroupManagerType}
 }
 
 // newManager returns an implementation of cgroups.Manager
 func (l *libcontainerAdapter) newManager(cgroups *libcontainerconfigs.Cgroup, paths map[string]string) (libcontainercgroups.Manager, error) {
 	switch l.cgroupManagerType {
 	case libcontainerCgroupfs:
-		if l.rootless {
-			return nil, fmt.Errorf("cgroup manager %v does not support rootless", l.cgroupManagerType)
-		}
 		if libcontainercgroups.IsCgroup2UnifiedMode() {
 			return cgroupfs2.NewManager(cgroups, paths["memory"], false)
 		}
@@ -162,10 +157,7 @@ func (l *libcontainerAdapter) newManager(cgroups *libcontainerconfigs.Cgroup, pa
 			panic("systemd cgroup manager not available")
 		}
 		if libcontainercgroups.IsCgroup2UnifiedMode() {
-			return cgroupsystemd.NewUnifiedManager(cgroups, paths["memory"], l.rootless), nil
-		}
-		if l.rootless {
-			return nil, fmt.Errorf("cgroup manager %v requires cgroup v2 for rootless", l.cgroupManagerType)
+			return cgroupsystemd.NewUnifiedManager(cgroups, paths["memory"], false), nil
 		}
 		return cgroupsystemd.NewLegacyManager(cgroups, paths), nil
 	}
@@ -199,26 +191,15 @@ type cgroupManagerImpl struct {
 var _ CgroupManager = &cgroupManagerImpl{}
 
 // NewCgroupManager is a factory method that returns a CgroupManager
-func NewCgroupManager(cs *CgroupSubsystems, cgroupDriver string, rootless bool) (CgroupManager, error) {
-	if cgroupDriver == noneDriver {
-		if !utilfeature.DefaultFeatureGate.Enabled(kubefeatures.SupportNoneCgroupDriver) {
-			return nil, fmt.Errorf("cgroup driver %q requires SupportNoneCgroupDriver feature gate", cgroupDriver)
-		}
-		cm := &noneCgroupManager{}
-		cm.init()
-		return cm, nil
-	}
+func NewCgroupManager(cs *CgroupSubsystems, cgroupDriver string) CgroupManager {
 	managerType := libcontainerCgroupfs
 	if cgroupDriver == string(libcontainerSystemd) {
 		managerType = libcontainerSystemd
 	}
-	if rootless && !utilfeature.DefaultFeatureGate.Enabled(kubefeatures.Rootless) {
-		return nil, fmt.Errorf("rootless requires Rootless feature gate")
-	}
 	return &cgroupManagerImpl{
 		subsystems: cs,
-		adapter:    newLibcontainerAdapter(managerType, rootless),
-	}, nil
+		adapter:    newLibcontainerAdapter(managerType),
+	}
 }
 
 // Name converts the cgroup to the driver specific value in cgroupfs form.
@@ -503,32 +484,21 @@ func propagateControllers(path string) error {
 }
 
 // setResourcesV2 sets cgroup resource limits on cgroup v2
-func setResourcesV2(cgroupConfig *libcontainerconfigs.Cgroup, rootless bool) error {
+func setResourcesV2(cgroupConfig *libcontainerconfigs.Cgroup) error {
 	if err := propagateControllers(cgroupConfig.Path); err != nil {
 		return err
 	}
-	if !rootless {
-		cgroupConfig.Resources.Devices = []*libcontainerconfigs.DeviceRule{
-			{
-				Type:        'a',
-				Permissions: "rwm",
-				Allow:       true,
-				Minor:       libcontainerconfigs.Wildcard,
-				Major:       libcontainerconfigs.Wildcard,
-			},
-		}
-	}
-	cgroupConfig.Resources.SkipDevices = true
-
-	// if the hugetlb controller is missing
-	supportedControllers := getSupportedUnifiedControllers()
-	if !supportedControllers.Has("hugetlb") {
-		cgroupConfig.Resources.HugetlbLimit = nil
-		// the cgroup is not present, but its not required so skip it
-		klog.V(6).Infof("Optional subsystem not supported: hugetlb")
+	cgroupConfig.Resources.Devices = []*libcontainerconfigs.DeviceRule{
+		{
+			Type:        'a',
+			Permissions: "rwm",
+			Allow:       true,
+			Minor:       libcontainerconfigs.Wildcard,
+			Major:       libcontainerconfigs.Wildcard,
+		},
 	}
 
-	manager, err := cgroupfs2.NewManager(cgroupConfig, cgroupConfig.Path, rootless)
+	manager, err := cgroupfs2.NewManager(cgroupConfig, cgroupConfig.Path, false)
 	if err != nil {
 		return fmt.Errorf("failed to create cgroup v2 manager: %v", err)
 	}
@@ -549,7 +519,6 @@ func (m *cgroupManagerImpl) toResources(resourceConfig *ResourceConfig) *libcont
 				Major:       libcontainerconfigs.Wildcard,
 			},
 		},
-		SkipDevices: true,
 	}
 	if resourceConfig == nil {
 		return resources
@@ -636,8 +605,7 @@ func (m *cgroupManagerImpl) Update(cgroupConfig *CgroupConfig) error {
 	}
 
 	if unified {
-		rootless := m.adapter.rootless
-		if err := setResourcesV2(libcontainerCgroupConfig, rootless); err != nil {
+		if err := setResourcesV2(libcontainerCgroupConfig); err != nil {
 			return fmt.Errorf("failed to set resources for cgroup %v: %v", cgroupConfig.Name, err)
 		}
 	} else {
@@ -797,7 +765,7 @@ func (m *cgroupManagerImpl) GetResourceStats(name CgroupName) (*ResourceStats, e
 	var stats *libcontainercgroups.Stats
 	if libcontainercgroups.IsCgroup2UnifiedMode() {
 		cgroupPath := m.buildCgroupUnifiedPath(name)
-		manager, err := cgroupfs2.NewManager(nil, cgroupPath, m.adapter.rootless)
+		manager, err := cgroupfs2.NewManager(nil, cgroupPath, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create cgroup v2 manager: %v", err)
 		}
@@ -816,56 +784,81 @@ func (m *cgroupManagerImpl) GetResourceStats(name CgroupName) (*ResourceStats, e
 	return toResourceStats(stats), nil
 }
 
-type noneCgroupManager struct {
-	names map[string]struct{}
+// Get the memory limit in bytes applied to the cgroup
+func (m *cgroupManagerImpl) GetCgroupMemoryConfig(name CgroupName) (uint64, error) {
+	cgroupPaths := m.buildCgroupPaths(name)
+	stats, err := getStatsSupportedSubsystems(cgroupPaths)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get stats supported cgroup subsystems for cgroup %v: %v", name, err)
+	}
+	return stats.MemoryStats.Usage.Limit, nil
 }
 
-func (m *noneCgroupManager) init() {
-	m.names = make(map[string]struct{})
+// Get the cpu quota, cpu period, and cpu shares applied to the cgroup
+func (m *cgroupManagerImpl) GetCgroupCpuConfig(name CgroupName) (int64, uint64, uint64, error) {
+	cgroupPaths := m.buildCgroupPaths(name)
+	cgroupCpuPath, found := cgroupPaths["cpu"]
+	if !found {
+		return 0, 0, 0, fmt.Errorf("failed to build CPU cgroup fs path for cgroup %v", name)
+	}
+	cpuQuotaStr, errQ := cgfscommon.GetCgroupParamString(cgroupCpuPath, "cpu.cfs_quota_us")
+	if errQ != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read CPU quota for cgroup %v: %v", name, errQ)
+	}
+	cpuQuota, errInt := strconv.ParseInt(cpuQuotaStr, 10, 64)
+	if errInt != nil {
+		return 0, 0, 0, fmt.Errorf("failed to convert CPU quota as integer for cgroup %v: %v", name, errInt)
+	}
+	cpuPeriod, errP := cgfscommon.GetCgroupParamUint(cgroupCpuPath, "cpu.cfs_period_us")
+	if errP != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read CPU period for cgroup %v: %v", name, errP)
+	}
+	cpuShares, errS := cgfscommon.GetCgroupParamUint(cgroupCpuPath, "cpu.shares")
+	if errP != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read CPU shares for cgroup %v: %v", name, errS)
+	}
+	return cpuQuota, cpuPeriod, cpuShares, nil
 }
 
-func (m *noneCgroupManager) Create(c *CgroupConfig) error {
-	name := m.Name(c.Name)
-	m.names[name] = struct{}{}
+// Set the memory limit in bytes applied to the cgroup
+func (m *cgroupManagerImpl) SetCgroupMemoryConfig(name CgroupName, memoryLimit int64) error {
+	cgroupPaths := m.buildCgroupPaths(name)
+	cgroupMemoryPath, found := cgroupPaths["memory"]
+	if !found {
+		return fmt.Errorf("failed to build memory cgroup fs path for cgroup %v", name)
+	}
+	memLimit := strconv.FormatInt(memoryLimit, 10)
+	if err := ioutil.WriteFile(filepath.Join(cgroupMemoryPath, "memory.limit_in_bytes"), []byte(memLimit), 0700); err != nil {
+		return fmt.Errorf("failed to write %v to %v: %v", memLimit, cgroupMemoryPath, err)
+	}
 	return nil
 }
 
-func (m *noneCgroupManager) Destroy(c *CgroupConfig) error {
-	name := m.Name(c.Name)
-	delete(m.names, name)
+// Set the cpu quota, cpu period, and cpu shares applied to the cgroup
+func (m *cgroupManagerImpl) SetCgroupCpuConfig(name CgroupName, cpuQuota *int64, cpuPeriod, cpuShares *uint64) error {
+	var cpuQuotaStr, cpuPeriodStr, cpuSharesStr string
+	cgroupPaths := m.buildCgroupPaths(name)
+	cgroupCpuPath, found := cgroupPaths["cpu"]
+	if !found {
+		return fmt.Errorf("failed to build cpu cgroup fs path for cgroup %v", name)
+	}
+	if cpuQuota != nil {
+		cpuQuotaStr = strconv.FormatInt(*cpuQuota, 10)
+		if err := ioutil.WriteFile(filepath.Join(cgroupCpuPath, "cpu.cfs_quota_us"), []byte(cpuQuotaStr), 0700); err != nil {
+			return fmt.Errorf("failed to write %v to %v: %v", cpuQuotaStr, cgroupCpuPath, err)
+		}
+	}
+	if cpuPeriod != nil {
+		cpuPeriodStr = strconv.FormatUint(*cpuPeriod, 10)
+		if err := ioutil.WriteFile(filepath.Join(cgroupCpuPath, "cpu.cfs_period_us"), []byte(cpuPeriodStr), 0700); err != nil {
+			return fmt.Errorf("failed to write %v to %v: %v", cpuPeriodStr, cgroupCpuPath, err)
+		}
+	}
+	if cpuShares != nil {
+		cpuSharesStr = strconv.FormatUint(*cpuShares, 10)
+		if err := ioutil.WriteFile(filepath.Join(cgroupCpuPath, "cpu.shares"), []byte(cpuSharesStr), 0700); err != nil {
+			return fmt.Errorf("failed to write %v to %v: %v", cpuSharesStr, cgroupCpuPath, err)
+		}
+	}
 	return nil
-}
-
-func (m *noneCgroupManager) Update(c *CgroupConfig) error {
-	name := m.Name(c.Name)
-	m.names[name] = struct{}{}
-	return nil
-}
-
-func (m *noneCgroupManager) Exists(cgname CgroupName) bool {
-	name := m.Name(cgname)
-	_, ok := m.names[name]
-	return ok
-}
-
-func (m *noneCgroupManager) Name(cgname CgroupName) string {
-	return cgname.ToCgroupfs()
-}
-
-func (m *noneCgroupManager) CgroupName(name string) CgroupName {
-	return ParseCgroupfsToCgroupName(name)
-}
-
-func (m *noneCgroupManager) Pids(_ CgroupName) []int {
-	return nil
-}
-
-func (m *noneCgroupManager) ReduceCPULimits(cgroupName CgroupName) error {
-	return nil
-}
-
-func (m *noneCgroupManager) GetResourceStats(name CgroupName) (*ResourceStats, error) {
-	return &ResourceStats{
-		MemoryStats: &MemoryStats{},
-	}, nil
 }

@@ -19,7 +19,6 @@ package v1beta1
 import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	componentbaseconfigv1alpha1 "k8s.io/component-base/config/v1alpha1"
 )
 
 // HairpinMode denotes how the kubelet should configure networking to handle
@@ -703,12 +702,6 @@ type KubeletConfiguration struct {
 	// Default: "Watch"
 	// +optional
 	ConfigMapAndSecretChangeDetectionStrategy ResourceChangeDetectionStrategy `json:"configMapAndSecretChangeDetectionStrategy,omitempty"`
-	// Rootless enables the rootless cgroup manager.
-	// Requires cgroup v2 and systemd.
-	// Requires the Rootless feature gate to be enabled.
-	// Default: false
-	// +optional
-	Rootless bool `json:"rootless,omitempty"`
 
 	/* the following fields are meant for Node Allocatable */
 
@@ -800,16 +793,6 @@ type KubeletConfiguration struct {
 	// Default: false
 	// +optional
 	KernelMemcgNotification bool `json:"kernelMemcgNotification,omitempty"`
-	// Logging specifies the options of logging.
-	// Refer [Logs Options](https://github.com/kubernetes/component-base/blob/master/logs/options.go) for more information.
-	// Defaults:
-	//   Format: text
-	// + optional
-	Logging componentbaseconfigv1alpha1.LoggingConfiguration `json:"logging,omitempty"`
-	// enableSystemLogHandler enables system logs via web interface host:port/logs/
-	// Default: true
-	// +optional
-	EnableSystemLogHandler *bool `json:"enableSystemLogHandler,omitempty"`
 }
 
 type KubeletAuthorizationMode string

@@ -24,7 +24,6 @@ go_test(
         "//vendor/github.com/stretchr/testify/assert:go_default_library",
         "//vendor/go.uber.org/zap:go_default_library",
         "//vendor/go.uber.org/zap/zapcore:go_default_library",
-        "//vendor/k8s.io/klog/v2:go_default_library",
     ],
 )
 

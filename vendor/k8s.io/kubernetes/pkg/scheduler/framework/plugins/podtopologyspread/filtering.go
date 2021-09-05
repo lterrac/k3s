@@ -285,7 +285,7 @@ func (pl *PodTopologySpread) Filter(ctx context.Context, cycleState *framework.C
 	}
 
 	// However, "empty" preFilterState is legit which tolerates every toSchedule Pod.
-	if len(s.Constraints) == 0 {
+	if len(s.TpPairToMatchNum) == 0 || len(s.Constraints) == 0 {
 		return nil
 	}
 
@@ -295,7 +295,7 @@ func (pl *PodTopologySpread) Filter(ctx context.Context, cycleState *framework.C
 		tpVal, ok := node.Labels[c.TopologyKey]
 		if !ok {
 			klog.V(5).Infof("node '%s' doesn't have required label '%s'", node.Name, tpKey)
-			return framework.NewStatus(framework.UnschedulableAndUnresolvable, ErrReasonNodeLabelNotMatch)
+			return framework.NewStatus(framework.Unschedulable, ErrReasonConstraintsNotMatch)
 		}
 
 		selfMatchNum := int32(0)

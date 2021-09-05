@@ -395,9 +395,11 @@ func (f *frameworkImpl) RunPreFilterPlugins(ctx context.Context, state *framewor
 		status = f.runPreFilterPlugin(ctx, pl, state, pod)
 		if !status.IsSuccess() {
 			if status.IsUnschedulable() {
-				return status
+				msg := fmt.Sprintf("rejected by %q at prefilter: %v", pl.Name(), status.Message())
+				klog.V(4).Infof(msg)
+				return framework.NewStatus(status.Code(), msg)
 			}
-			msg := fmt.Sprintf("prefilter plugin %q failed for pod %q: %v", pl.Name(), pod.Name, status.Message())
+			msg := fmt.Sprintf("error while running %q prefilter plugin for pod %q: %v", pl.Name(), pod.Name, status.Message())
 			klog.Error(msg)
 			return framework.NewStatus(framework.Error, msg)
 		}

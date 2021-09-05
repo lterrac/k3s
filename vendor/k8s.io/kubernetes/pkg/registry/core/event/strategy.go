@@ -23,9 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/generic"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/apiserver/pkg/storage"
@@ -59,9 +57,8 @@ func (eventStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Obje
 }
 
 func (eventStrategy) Validate(ctx context.Context, obj runtime.Object) field.ErrorList {
-	groupVersion := requestGroupVersion(ctx)
 	event := obj.(*api.Event)
-	return validation.ValidateEventCreate(event, groupVersion)
+	return validation.ValidateEvent(event)
 }
 
 // Canonicalize normalizes the object after validation.
@@ -73,10 +70,8 @@ func (eventStrategy) AllowCreateOnUpdate() bool {
 }
 
 func (eventStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
-	groupVersion := requestGroupVersion(ctx)
 	event := obj.(*api.Event)
-	oldEvent := obj.(*api.Event)
-	return validation.ValidateEventUpdate(event, oldEvent, groupVersion)
+	return validation.ValidateEvent(event)
 }
 
 func (eventStrategy) AllowUnconditionalUpdate() bool {
@@ -104,10 +99,6 @@ func Matcher(label labels.Selector, field fields.Selector) storage.SelectionPred
 // ToSelectableFields returns a field set that represents the object.
 func ToSelectableFields(event *api.Event) fields.Set {
 	objectMetaFieldsSet := generic.ObjectMetaFieldsSet(&event.ObjectMeta, true)
-	source := event.Source.Component
-	if source == "" {
-		source = event.ReportingController
-	}
 	specificFieldsSet := fields.Set{
 		"involvedObject.kind":            event.InvolvedObject.Kind,
 		"involvedObject.namespace":       event.InvolvedObject.Namespace,
@@ -117,17 +108,8 @@ func ToSelectableFields(event *api.Event) fields.Set {
 		"involvedObject.resourceVersion": event.InvolvedObject.ResourceVersion,
 		"involvedObject.fieldPath":       event.InvolvedObject.FieldPath,
 		"reason":                         event.Reason,
-		"reportingComponent":             event.ReportingController, // use the core/v1 field name
-		"source":                         source,
+		"source":                         event.Source.Component,
 		"type":                           event.Type,
 	}
 	return generic.MergeFieldsSets(objectMetaFieldsSet, specificFieldsSet)
-}
-
-// requestGroupVersion returns the group/version associated with the given context, or a zero-value group/version.
-func requestGroupVersion(ctx context.Context) schema.GroupVersion {
-	if requestInfo, found := genericapirequest.RequestInfoFrom(ctx); found {
-		return schema.GroupVersion{Group: requestInfo.APIGroup, Version: requestInfo.APIVersion}
-	}
-	return schema.GroupVersion{}
 }

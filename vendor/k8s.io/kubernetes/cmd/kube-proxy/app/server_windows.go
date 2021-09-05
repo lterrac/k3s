@@ -159,11 +159,7 @@ func newProxyServer(config *proxyconfigapi.KubeProxyConfiguration, cleanupAndExi
 			return nil, fmt.Errorf("unable to create proxier: %v", err)
 		}
 	}
-	useEndpointSlices := utilfeature.DefaultFeatureGate.Enabled(features.WindowsEndpointSliceProxying)
-	if proxyMode == proxyModeUserspace {
-		// userspace mode doesn't support endpointslice.
-		useEndpointSlices = false
-	}
+
 	return &ProxyServer{
 		Client:              client,
 		EventClient:         eventClient,
@@ -178,7 +174,7 @@ func newProxyServer(config *proxyconfigapi.KubeProxyConfiguration, cleanupAndExi
 		OOMScoreAdj:         config.OOMScoreAdj,
 		ConfigSyncPeriod:    config.ConfigSyncPeriod.Duration,
 		HealthzServer:       healthzServer,
-		UseEndpointSlices:   useEndpointSlices,
+		UseEndpointSlices:   false,
 	}, nil
 }
 

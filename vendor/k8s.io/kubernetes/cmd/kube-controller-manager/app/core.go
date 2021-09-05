@@ -57,7 +57,6 @@ import (
 	ttlcontroller "k8s.io/kubernetes/pkg/controller/ttl"
 	"k8s.io/kubernetes/pkg/controller/ttlafterfinished"
 	"k8s.io/kubernetes/pkg/controller/volume/attachdetach"
-	"k8s.io/kubernetes/pkg/controller/volume/ephemeral"
 	"k8s.io/kubernetes/pkg/controller/volume/expand"
 	persistentvolumecontroller "k8s.io/kubernetes/pkg/controller/volume/persistentvolume"
 	"k8s.io/kubernetes/pkg/controller/volume/pvcprotection"
@@ -359,6 +358,7 @@ func startVolumeExpandController(ctx ControllerContext) (http.Handler, bool, err
 			ctx.ClientBuilder.ClientOrDie("expand-controller"),
 			ctx.InformerFactory.Core().V1().PersistentVolumeClaims(),
 			ctx.InformerFactory.Core().V1().PersistentVolumes(),
+			ctx.InformerFactory.Storage().V1().StorageClasses(),
 			ctx.Cloud,
 			plugins,
 			csiTranslator,
@@ -368,22 +368,6 @@ func startVolumeExpandController(ctx ControllerContext) (http.Handler, bool, err
 			return nil, true, fmt.Errorf("failed to start volume expand controller: %v", expandControllerErr)
 		}
 		go expandController.Run(ctx.Stop)
-		return nil, true, nil
-	}
-	return nil, false, nil
-}
-
-func startEphemeralVolumeController(ctx ControllerContext) (http.Handler, bool, error) {
-	if utilfeature.DefaultFeatureGate.Enabled(features.GenericEphemeralVolume) {
-		ephemeralController, err := ephemeral.NewController(
-			ctx.ClientBuilder.ClientOrDie("ephemeral-volume-controller"),
-			ctx.InformerFactory.Core().V1().Pods(),
-			ctx.InformerFactory.Core().V1().PersistentVolumeClaims())
-		if err != nil {
-			return nil, true, fmt.Errorf("failed to start ephemeral volume controller: %v", err)
-		}
-		// TODO (before beta at the latest): make this configurable similar to the EndpointController
-		go ephemeralController.Run(1 /* int(ctx.ComponentConfig.EphemeralController.ConcurrentEphemeralVolumeSyncs) */, ctx.Stop)
 		return nil, true, nil
 	}
 	return nil, false, nil
@@ -554,7 +538,6 @@ func startPVCProtectionController(ctx ControllerContext) (http.Handler, bool, er
 		ctx.InformerFactory.Core().V1().PersistentVolumeClaims(),
 		ctx.InformerFactory.Core().V1().Pods(),
 		ctx.ClientBuilder.ClientOrDie("pvc-protection-controller"),
-		utilfeature.DefaultFeatureGate.Enabled(features.StorageObjectInUseProtection),
 		utilfeature.DefaultFeatureGate.Enabled(features.StorageObjectInUseProtection),
 	)
 	if err != nil {

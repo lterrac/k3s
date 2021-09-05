@@ -607,9 +607,6 @@ func (runner *runner) chainExists(table Table, chain Chain) (bool, error) {
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 
-	trace := utiltrace.New("iptables Monitor CANARY check")
-	defer trace.LogIfLong(2 * time.Second)
-
 	_, err := runner.run(opListChain, fullArgs)
 	return err == nil, err
 }
@@ -620,7 +617,7 @@ const (
 	opCreateChain operation = "-N"
 	opFlushChain  operation = "-F"
 	opDeleteChain operation = "-X"
-	opListChain   operation = "-S"
+	opListChain   operation = "-L"
 	opAppendRule  operation = "-A"
 	opCheckRule   operation = "-C"
 	opDeleteRule  operation = "-D"

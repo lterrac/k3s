@@ -83,11 +83,11 @@ type objState struct {
 }
 
 // New returns an etcd3 implementation of storage.Interface.
-func New(c *clientv3.Client, codec runtime.Codec, prefix string, transformer value.Transformer, pagingEnabled bool, leaseManagerConfig LeaseManagerConfig) storage.Interface {
-	return newStore(c, pagingEnabled, codec, prefix, transformer, leaseManagerConfig)
+func New(c *clientv3.Client, codec runtime.Codec, prefix string, transformer value.Transformer, pagingEnabled bool) storage.Interface {
+	return newStore(c, pagingEnabled, codec, prefix, transformer)
 }
 
-func newStore(c *clientv3.Client, pagingEnabled bool, codec runtime.Codec, prefix string, transformer value.Transformer, leaseManagerConfig LeaseManagerConfig) *store {
+func newStore(c *clientv3.Client, pagingEnabled bool, codec runtime.Codec, prefix string, transformer value.Transformer) *store {
 	versioner := APIObjectVersioner{}
 	result := &store{
 		client:        c,
@@ -100,7 +100,7 @@ func newStore(c *clientv3.Client, pagingEnabled bool, codec runtime.Codec, prefi
 		// keeps compatibility with etcd2 impl for custom prefixes that don't start with '/'
 		pathPrefix:   path.Join("/", prefix),
 		watcher:      newWatcher(c, codec, versioner, transformer),
-		leaseManager: newDefaultLeaseManager(c, leaseManagerConfig),
+		leaseManager: newDefaultLeaseManager(c),
 	}
 	return result
 }
@@ -452,14 +452,6 @@ func getNewItemFunc(listObj runtime.Object, v reflect.Value) func() runtime.Obje
 
 func (s *store) Count(key string) (int64, error) {
 	key = path.Join(s.pathPrefix, key)
-
-	// We need to make sure the key ended with "/" so that we only get children "directories".
-	// e.g. if we have key "/a", "/a/b", "/ab", getting keys with prefix "/a" will return all three,
-	// while with prefix "/a/" will return only "/a/b" which is the correct answer.
-	if !strings.HasSuffix(key, "/") {
-		key += "/"
-	}
-
 	startTime := time.Now()
 	getResp, err := s.client.KV.Get(context.Background(), key, clientv3.WithRange(clientv3.GetPrefixRangeEnd(key)), clientv3.WithCountOnly())
 	metrics.RecordEtcdRequestLatency("listWithCount", key, startTime)
@@ -580,7 +572,7 @@ func (s *store) List(ctx context.Context, key string, opts storage.ListOptions, 
 		fromRV = &parsedRV
 	}
 
-	var returnedRV, continueRV, withRev int64
+	var returnedRV, continueRV int64
 	var continueKey string
 	switch {
 	case s.pagingEnabled && len(pred.Continue) > 0:
@@ -601,7 +593,7 @@ func (s *store) List(ctx context.Context, key string, opts storage.ListOptions, 
 		// continueRV==0 is invalid.
 		// If continueRV < 0, the request is for the latest resource version.
 		if continueRV > 0 {
-			withRev = continueRV
+			options = append(options, clientv3.WithRev(continueRV))
 			returnedRV = continueRV
 		}
 	case s.pagingEnabled && pred.Limit > 0:
@@ -612,11 +604,11 @@ func (s *store) List(ctx context.Context, key string, opts storage.ListOptions, 
 				// and returnedRV is then set to the revision we get from the etcd response.
 			case metav1.ResourceVersionMatchExact:
 				returnedRV = int64(*fromRV)
-				withRev = returnedRV
+				options = append(options, clientv3.WithRev(returnedRV))
 			case "": // legacy case
 				if *fromRV > 0 {
 					returnedRV = int64(*fromRV)
-					withRev = returnedRV
+					options = append(options, clientv3.WithRev(returnedRV))
 				}
 			default:
 				return fmt.Errorf("unknown ResourceVersionMatch value: %v", match)
@@ -633,7 +625,7 @@ func (s *store) List(ctx context.Context, key string, opts storage.ListOptions, 
 				// and returnedRV is then set to the revision we get from the etcd response.
 			case metav1.ResourceVersionMatchExact:
 				returnedRV = int64(*fromRV)
-				withRev = returnedRV
+				options = append(options, clientv3.WithRev(returnedRV))
 			case "": // legacy case
 			default:
 				return fmt.Errorf("unknown ResourceVersionMatch value: %v", match)
@@ -641,9 +633,6 @@ func (s *store) List(ctx context.Context, key string, opts storage.ListOptions, 
 		}
 
 		options = append(options, clientv3.WithPrefix())
-	}
-	if withRev != 0 {
-		options = append(options, clientv3.WithRev(withRev))
 	}
 
 	// loop until we have filled the requested limit from etcd or there are no more results
@@ -695,10 +684,6 @@ func (s *store) List(ctx context.Context, key string, opts storage.ListOptions, 
 		// indicate to the client which resource version was returned
 		if returnedRV == 0 {
 			returnedRV = getResp.Header.Revision
-			// if returnedRV was not set previously then WithRev option was not either, so set here in case
-			// hasMore is true and we do a subsequent Get.  If we don't set this the next Get may give
-			// back inconsistent data because we are Get-ing the latest data and not at a specific revision
-			options = append(options, clientv3.WithRev(returnedRV))
 		}
 
 		// no more results remain or we didn't request paging
@@ -710,10 +695,6 @@ func (s *store) List(ctx context.Context, key string, opts storage.ListOptions, 
 			break
 		}
 		key = string(lastKey) + "\x00"
-		if withRev == 0 {
-			withRev = returnedRV
-			options = append(options, clientv3.WithRev(withRev))
-		}
 	}
 
 	// instruct the client to begin querying from immediately after the last key we returned

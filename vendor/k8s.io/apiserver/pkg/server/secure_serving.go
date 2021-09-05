@@ -20,12 +20,8 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
-	"log"
 	"net"
 	"net/http"
-	"os"
-	"strings"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -33,7 +29,6 @@ import (
 	"k8s.io/klog/v2"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apiserver/pkg/endpoints/metrics"
 	"k8s.io/apiserver/pkg/server/dynamiccertificates"
 )
 
@@ -189,11 +184,6 @@ func (s *SecureServingInfo) Serve(handler http.Handler, shutdownTimeout time.Dur
 		}
 	}
 
-	// use tlsHandshakeErrorWriter to handle messages of tls handshake error
-	tlsErrorWriter := &tlsHandshakeErrorWriter{os.Stderr}
-	tlsErrorLogger := log.New(tlsErrorWriter, "", 0)
-	secureServer.ErrorLog = tlsErrorLogger
-
 	klog.Infof("Serving securely on %s", secureServer.Addr)
 	return RunServer(secureServer, s.Listener, shutdownTimeout, stopCh)
 }
@@ -267,23 +257,4 @@ func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
 		tc.SetKeepAlivePeriod(defaultKeepAlivePeriod)
 	}
 	return c, nil
-}
-
-// tlsHandshakeErrorWriter writes TLS handshake errors to klog with
-// trace level - V(5), to avoid flooding of tls handshake errors.
-type tlsHandshakeErrorWriter struct {
-	out io.Writer
-}
-
-const tlsHandshakeErrorPrefix = "http: TLS handshake error"
-
-func (w *tlsHandshakeErrorWriter) Write(p []byte) (int, error) {
-	if strings.Contains(string(p), tlsHandshakeErrorPrefix) {
-		klog.V(5).Info(string(p))
-		metrics.TLSHandshakeErrors.Inc()
-		return len(p), nil
-	}
-
-	// for non tls handshake error, log it as usual
-	return w.out.Write(p)
 }

@@ -52,10 +52,11 @@ func Client() (*dclient.Client, error) {
 				TLSClientConfig: tlsc,
 			}
 		}
-		dockerClient, dockerClientErr = dclient.NewClientWithOpts(
-			dclient.WithHost(*ArgDockerEndpoint),
-			dclient.WithHTTPClient(client),
-			dclient.WithAPIVersionNegotiation())
+		dockerClient, dockerClientErr = dclient.NewClient(*ArgDockerEndpoint,
+			"",
+			client,
+			nil)
+
 	})
 	return dockerClient, dockerClientErr
 }

@@ -79,7 +79,9 @@ func (a customResourceStrategy) PrepareForCreate(ctx context.Context, obj runtim
 		customResource := customResourceObject.UnstructuredContent()
 
 		// create cannot set status
-		delete(customResource, "status")
+		if _, ok := customResource["status"]; ok {
+			delete(customResource, "status")
+		}
 	}
 
 	accessor, _ := meta.Accessor(obj)

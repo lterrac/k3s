@@ -237,7 +237,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}) {
 	klog.Infof("Starting endpoint slice controller")
 	defer klog.Infof("Shutting down endpoint slice controller")
 
-	if !cache.WaitForNamedCacheSync("endpoint_slice", stopCh, c.podsSynced, c.servicesSynced, c.endpointSlicesSynced, c.nodesSynced) {
+	if !cache.WaitForNamedCacheSync("endpoint_slice", stopCh, c.podsSynced, c.servicesSynced) {
 		return
 	}
 
@@ -307,7 +307,6 @@ func (c *Controller) syncService(key string) error {
 		if apierrors.IsNotFound(err) {
 			c.triggerTimeTracker.DeleteService(namespace, name)
 			c.reconciler.deleteService(namespace, name)
-			c.endpointSliceTracker.DeleteService(namespace, name)
 			// The service has been deleted, return nil so that it won't be retried.
 			return nil
 		}
@@ -344,10 +343,6 @@ func (c *Controller) syncService(key string) error {
 		c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToListEndpointSlices",
 			"Error listing Endpoint Slices for Service %s/%s: %v", service.Namespace, service.Name, err)
 		return err
-	}
-
-	if c.endpointSliceTracker.StaleSlices(service, endpointSlices) {
-		return &StaleInformerCache{"EndpointSlice informer cache is out of date"}
 	}
 
 	// We call ComputeEndpointLastChangeTriggerTime here to make sure that the
@@ -399,7 +394,7 @@ func (c *Controller) onEndpointSliceAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("Invalid EndpointSlice provided to onEndpointSliceAdd()"))
 		return
 	}
-	if managedByController(endpointSlice) && c.endpointSliceTracker.ShouldSync(endpointSlice) {
+	if managedByController(endpointSlice) && c.endpointSliceTracker.Stale(endpointSlice) {
 		c.queueServiceForEndpointSlice(endpointSlice)
 	}
 }
@@ -415,18 +410,7 @@ func (c *Controller) onEndpointSliceUpdate(prevObj, obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("Invalid EndpointSlice provided to onEndpointSliceUpdate()"))
 		return
 	}
-	// EndpointSlice generation does not change when labels change. Although the
-	// controller will never change LabelServiceName, users might. This check
-	// ensures that we handle changes to this label.
-	svcName := endpointSlice.Labels[discovery.LabelServiceName]
-	prevSvcName := prevEndpointSlice.Labels[discovery.LabelServiceName]
-	if svcName != prevSvcName {
-		klog.Warningf("%s label changed from %s  to %s for %s", discovery.LabelServiceName, prevSvcName, svcName, endpointSlice.Name)
-		c.queueServiceForEndpointSlice(endpointSlice)
-		c.queueServiceForEndpointSlice(prevEndpointSlice)
-		return
-	}
-	if managedByChanged(prevEndpointSlice, endpointSlice) || (managedByController(endpointSlice) && c.endpointSliceTracker.ShouldSync(endpointSlice)) {
+	if managedByChanged(prevEndpointSlice, endpointSlice) || (managedByController(endpointSlice) && c.endpointSliceTracker.Stale(endpointSlice)) {
 		c.queueServiceForEndpointSlice(endpointSlice)
 	}
 }
@@ -437,11 +421,7 @@ func (c *Controller) onEndpointSliceUpdate(prevObj, obj interface{}) {
 func (c *Controller) onEndpointSliceDelete(obj interface{}) {
 	endpointSlice := getEndpointSliceFromDeleteAction(obj)
 	if endpointSlice != nil && managedByController(endpointSlice) && c.endpointSliceTracker.Has(endpointSlice) {
-		// This returns false if we didn't expect the EndpointSlice to be
-		// deleted. If that is the case, we queue the Service for another sync.
-		if !c.endpointSliceTracker.HandleDeletion(endpointSlice) {
-			c.queueServiceForEndpointSlice(endpointSlice)
-		}
+		c.queueServiceForEndpointSlice(endpointSlice)
 	}
 }
 
@@ -476,7 +456,7 @@ func (c *Controller) addPod(obj interface{}) {
 }
 
 func (c *Controller) updatePod(old, cur interface{}) {
-	services := endpointutil.GetServicesToUpdateOnPodChange(c.serviceLister, c.serviceSelectorCache, old, cur)
+	services := endpointutil.GetServicesToUpdateOnPodChange(c.serviceLister, c.serviceSelectorCache, old, cur, podEndpointChanged)
 	for key := range services {
 		c.queue.AddAfter(key, c.endpointUpdatesBatchPeriod)
 	}

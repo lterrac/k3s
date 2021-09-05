@@ -124,7 +124,8 @@ func Convert_custom_metrics_MetricListOptions_To_v1beta2_MetricListOptions(in *c
 }
 
 func autoConvert_v1beta2_MetricValue_To_custom_metrics_MetricValue(in *MetricValue, out *custommetrics.MetricValue, s conversion.Scope) error {
-	if err := custommetrics.Convert_v1_ObjectReference_To_custom_metrics_ObjectReference(&in.DescribedObject, &out.DescribedObject, s); err != nil {
+	// TODO: Inefficient conversion - can we improve it?
+	if err := s.Convert(&in.DescribedObject, &out.DescribedObject, 0); err != nil {
 		return err
 	}
 	if err := Convert_v1beta2_MetricIdentifier_To_custom_metrics_MetricIdentifier(&in.Metric, &out.Metric, s); err != nil {
@@ -142,7 +143,8 @@ func Convert_v1beta2_MetricValue_To_custom_metrics_MetricValue(in *MetricValue, 
 }
 
 func autoConvert_custom_metrics_MetricValue_To_v1beta2_MetricValue(in *custommetrics.MetricValue, out *MetricValue, s conversion.Scope) error {
-	if err := custommetrics.Convert_custom_metrics_ObjectReference_To_v1_ObjectReference(&in.DescribedObject, &out.DescribedObject, s); err != nil {
+	// TODO: Inefficient conversion - can we improve it?
+	if err := s.Convert(&in.DescribedObject, &out.DescribedObject, 0); err != nil {
 		return err
 	}
 	if err := Convert_custom_metrics_MetricIdentifier_To_v1beta2_MetricIdentifier(&in.Metric, &out.Metric, s); err != nil {
@@ -161,17 +163,7 @@ func Convert_custom_metrics_MetricValue_To_v1beta2_MetricValue(in *custommetrics
 
 func autoConvert_v1beta2_MetricValueList_To_custom_metrics_MetricValueList(in *MetricValueList, out *custommetrics.MetricValueList, s conversion.Scope) error {
 	out.ListMeta = in.ListMeta
-	if in.Items != nil {
-		in, out := &in.Items, &out.Items
-		*out = make([]custommetrics.MetricValue, len(*in))
-		for i := range *in {
-			if err := Convert_v1beta2_MetricValue_To_custom_metrics_MetricValue(&(*in)[i], &(*out)[i], s); err != nil {
-				return err
-			}
-		}
-	} else {
-		out.Items = nil
-	}
+	out.Items = *(*[]custommetrics.MetricValue)(unsafe.Pointer(&in.Items))
 	return nil
 }
 
@@ -182,17 +174,7 @@ func Convert_v1beta2_MetricValueList_To_custom_metrics_MetricValueList(in *Metri
 
 func autoConvert_custom_metrics_MetricValueList_To_v1beta2_MetricValueList(in *custommetrics.MetricValueList, out *MetricValueList, s conversion.Scope) error {
 	out.ListMeta = in.ListMeta
-	if in.Items != nil {
-		in, out := &in.Items, &out.Items
-		*out = make([]MetricValue, len(*in))
-		for i := range *in {
-			if err := Convert_custom_metrics_MetricValue_To_v1beta2_MetricValue(&(*in)[i], &(*out)[i], s); err != nil {
-				return err
-			}
-		}
-	} else {
-		out.Items = nil
-	}
+	out.Items = *(*[]MetricValue)(unsafe.Pointer(&in.Items))
 	return nil
 }
 

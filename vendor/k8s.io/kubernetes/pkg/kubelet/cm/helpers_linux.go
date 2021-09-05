@@ -38,11 +38,8 @@ import (
 )
 
 const (
-	// These limits are defined in the kernel:
-	// https://github.com/torvalds/linux/blob/0bddd227f3dc55975e2b8dfa7fc6f959b062a2c7/kernel/sched/sched.h#L427-L428
-	MinShares = 2
-	MaxShares = 262144
-
+	// Taken from lmctfy https://github.com/google/lmctfy/blob/master/lmctfy/controllers/cpu_controller.cc
+	MinShares     = 2
 	SharesPerCPU  = 1024
 	MilliCPUToCPU = 1000
 
@@ -91,9 +88,6 @@ func MilliCPUToShares(milliCPU int64) uint64 {
 	if shares < MinShares {
 		return MinShares
 	}
-	if shares > MaxShares {
-		return MaxShares
-	}
 	return uint64(shares)
 }
 
@@ -118,6 +112,9 @@ func HugePageLimits(resourceList v1.ResourceList) map[int64]int64 {
 func ResourceConfigForPod(pod *v1.Pod, enforceCPULimits bool, cpuPeriod uint64) *ResourceConfig {
 	// sum requests and limits.
 	reqs, limits := resource.PodRequestsAndLimits(pod)
+	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.InPlacePodVerticalScaling) {
+		reqs = resource.PodResourceAllocations(pod)
+	}
 
 	cpuRequests := int64(0)
 	cpuLimits := int64(0)
@@ -149,6 +146,9 @@ func ResourceConfigForPod(pod *v1.Pod, enforceCPULimits bool, cpuPeriod uint64) 
 			memoryLimitsDeclared = false
 		}
 		containerHugePageLimits := HugePageLimits(container.Resources.Requests)
+		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.InPlacePodVerticalScaling) {
+			containerHugePageLimits = HugePageLimits(container.ResourcesAllocated)
+		}
 		for k, v := range containerHugePageLimits {
 			if value, exists := hugePageLimits[k]; exists {
 				hugePageLimits[k] = value + v

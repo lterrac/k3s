@@ -18,8 +18,6 @@
 package resctrl
 
 import (
-	"os"
-
 	"github.com/google/cadvisor/stats"
 
 	"github.com/opencontainers/runc/libcontainer/intelrdt"
@@ -31,9 +29,6 @@ type manager struct {
 }
 
 func (m manager) GetCollector(resctrlPath string) (stats.Collector, error) {
-	if _, err := os.Stat(resctrlPath); err != nil {
-		return &stats.NoopCollector{}, err
-	}
 	collector := newCollector(m.id, resctrlPath)
 	return collector, nil
 }

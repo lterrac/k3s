@@ -21,7 +21,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/server/egressselector"
-	"k8s.io/apiserver/pkg/storage/etcd3"
 	"k8s.io/apiserver/pkg/storage/value"
 )
 
@@ -75,8 +74,6 @@ type Config struct {
 	CountMetricPollPeriod time.Duration
 	// DBMetricPollInterval specifies how often should storage backend metric be updated.
 	DBMetricPollInterval time.Duration
-
-	LeaseManagerConfig etcd3.LeaseManagerConfig
 }
 
 func NewDefaultConfig(prefix string, codec runtime.Codec) *Config {
@@ -86,6 +83,5 @@ func NewDefaultConfig(prefix string, codec runtime.Codec) *Config {
 		Codec:                codec,
 		CompactionInterval:   DefaultCompactInterval,
 		DBMetricPollInterval: DefaultDBMetricPollInterval,
-		LeaseManagerConfig:   etcd3.NewDefaultLeaseManagerConfig(),
 	}
 }

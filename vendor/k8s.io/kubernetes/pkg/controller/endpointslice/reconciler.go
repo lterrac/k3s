@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -58,7 +59,7 @@ type endpointMeta struct {
 func (r *reconciler) reconcile(service *corev1.Service, pods []*corev1.Pod, existingSlices []*discovery.EndpointSlice, triggerTime time.Time) error {
 	addressType := discovery.AddressTypeIPv4
 
-	if endpointutil.IsIPv6Service(service) {
+	if isIPv6Service(service) {
 		addressType = discovery.AddressTypeIPv6
 	}
 
@@ -70,7 +71,7 @@ func (r *reconciler) reconcile(service *corev1.Service, pods []*corev1.Pod, exis
 	existingSlicesByPortMap := map[endpointutil.PortMapKey][]*discovery.EndpointSlice{}
 	numExistingEndpoints := 0
 	for _, existingSlice := range existingSlices {
-		if existingSlice.AddressType == addressType && ownedBy(existingSlice, service) {
+		if existingSlice.AddressType == addressType {
 			epHash := endpointutil.NewPortMapKey(existingSlice.Ports)
 			existingSlicesByPortMap[epHash] = append(existingSlicesByPortMap[epHash], existingSlice)
 			numExistingEndpoints += len(existingSlice.Endpoints)
@@ -179,6 +180,8 @@ func (r *reconciler) finalize(
 	slicesToDelete []*discovery.EndpointSlice,
 	triggerTime time.Time,
 ) error {
+	errs := []error{}
+
 	// If there are slices to create and delete, change the creates to updates
 	// of the slices that would otherwise be deleted.
 	for i := 0; i < len(slicesToDelete); {
@@ -187,15 +190,13 @@ func (r *reconciler) finalize(
 		}
 		sliceToDelete := slicesToDelete[i]
 		slice := slicesToCreate[len(slicesToCreate)-1]
-		// Only update EndpointSlices that are owned by this Service and have
-		// the same AddressType. We need to avoid updating EndpointSlices that
-		// are being garbage collected for an old Service with the same name.
-		// The AddressType field is immutable. Since Services also consider
-		// IPFamily immutable, the only case where this should matter will be
-		// the migration from IP to IPv4 and IPv6 AddressTypes, where there's a
+		// Only update EndpointSlices that have the same AddressType as this
+		// field is considered immutable. Since Services also consider IPFamily
+		// immutable, the only case where this should matter will be the
+		// migration from IP to IPv4 and IPv6 AddressTypes, where there's a
 		// chance EndpointSlices with an IP AddressType would otherwise be
 		// updated to IPv4 or IPv6 without this check.
-		if sliceToDelete.AddressType == slice.AddressType && ownedBy(sliceToDelete, service) {
+		if sliceToDelete.AddressType == slice.AddressType {
 			slice.Name = sliceToDelete.Name
 			slicesToCreate = slicesToCreate[:len(slicesToCreate)-1]
 			slicesToUpdate = append(slicesToUpdate, slice)
@@ -205,20 +206,16 @@ func (r *reconciler) finalize(
 		}
 	}
 
-	// Don't create new EndpointSlices if the Service is pending deletion. This
-	// is to avoid a potential race condition with the garbage collector where
-	// it tries to delete EndpointSlices as this controller replaces them.
-	if service.DeletionTimestamp == nil {
-		for _, endpointSlice := range slicesToCreate {
-			addTriggerTimeAnnotation(endpointSlice, triggerTime)
-			createdSlice, err := r.client.DiscoveryV1beta1().EndpointSlices(service.Namespace).Create(context.TODO(), endpointSlice, metav1.CreateOptions{})
-			if err != nil {
-				// If the namespace is terminating, creates will continue to fail. Simply drop the item.
-				if errors.HasStatusCause(err, corev1.NamespaceTerminatingCause) {
-					return nil
-				}
-				return fmt.Errorf("failed to create EndpointSlice for Service %s/%s: %v", service.Namespace, service.Name, err)
+	for _, endpointSlice := range slicesToCreate {
+		addTriggerTimeAnnotation(endpointSlice, triggerTime)
+		createdSlice, err := r.client.DiscoveryV1beta1().EndpointSlices(service.Namespace).Create(context.TODO(), endpointSlice, metav1.CreateOptions{})
+		if err != nil {
+			// If the namespace is terminating, creates will continue to fail. Simply drop the item.
+			if errors.HasStatusCause(err, corev1.NamespaceTerminatingCause) {
+				return nil
 			}
+			errs = append(errs, fmt.Errorf("Error creating EndpointSlice for Service %s/%s: %v", service.Namespace, service.Name, err))
+		} else {
 			r.endpointSliceTracker.Update(createdSlice)
 			metrics.EndpointSliceChanges.WithLabelValues("create").Inc()
 		}
@@ -228,22 +225,24 @@ func (r *reconciler) finalize(
 		addTriggerTimeAnnotation(endpointSlice, triggerTime)
 		updatedSlice, err := r.client.DiscoveryV1beta1().EndpointSlices(service.Namespace).Update(context.TODO(), endpointSlice, metav1.UpdateOptions{})
 		if err != nil {
-			return fmt.Errorf("failed to update %s EndpointSlice for Service %s/%s: %v", endpointSlice.Name, service.Namespace, service.Name, err)
+			errs = append(errs, fmt.Errorf("Error updating %s EndpointSlice for Service %s/%s: %v", endpointSlice.Name, service.Namespace, service.Name, err))
+		} else {
+			r.endpointSliceTracker.Update(updatedSlice)
+			metrics.EndpointSliceChanges.WithLabelValues("update").Inc()
 		}
-		r.endpointSliceTracker.Update(updatedSlice)
-		metrics.EndpointSliceChanges.WithLabelValues("update").Inc()
 	}
 
 	for _, endpointSlice := range slicesToDelete {
 		err := r.client.DiscoveryV1beta1().EndpointSlices(service.Namespace).Delete(context.TODO(), endpointSlice.Name, metav1.DeleteOptions{})
 		if err != nil {
-			return fmt.Errorf("failed to delete %s EndpointSlice for Service %s/%s: %v", endpointSlice.Name, service.Namespace, service.Name, err)
+			errs = append(errs, fmt.Errorf("Error deleting %s EndpointSlice for Service %s/%s: %v", endpointSlice.Name, service.Namespace, service.Name, err))
+		} else {
+			r.endpointSliceTracker.Delete(endpointSlice)
+			metrics.EndpointSliceChanges.WithLabelValues("delete").Inc()
 		}
-		r.endpointSliceTracker.ExpectDeletion(endpointSlice)
-		metrics.EndpointSliceChanges.WithLabelValues("delete").Inc()
 	}
 
-	return nil
+	return utilerrors.NewAggregate(errs)
 }
 
 // reconcileByPortMapping compares the endpoints found in existing slices with

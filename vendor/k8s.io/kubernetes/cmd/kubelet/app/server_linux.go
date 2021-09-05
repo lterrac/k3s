@@ -29,7 +29,6 @@ func watchForLockfileContention(path string, done chan struct{}) error {
 	}
 	if err = watcher.AddWatch(path, inotify.InOpen|inotify.InDeleteSelf); err != nil {
 		klog.Errorf("unable to watch lockfile: %v", err)
-		watcher.Close()
 		return err
 	}
 	go func() {
@@ -40,7 +39,6 @@ func watchForLockfileContention(path string, done chan struct{}) error {
 			klog.Errorf("inotify watcher error: %v", err)
 		}
 		close(done)
-		watcher.Close()
 	}()
 	return nil
 }
